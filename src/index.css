@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --dt-bg: #ffffff;
+    --dt-surface: #f2f2f2;
+    --dt-surface-hover: #e5e5e5;
+    --dt-border: rgba(0, 0, 0, 0.1);
+    --dt-text: #0f0f0f;
+    --dt-text-muted: #606060;
+    --dt-accent: #ff0033;
+  }
+
+  .dark {
+    --dt-bg: #0f0f0f;
+    --dt-surface: #272727;
+    --dt-surface-hover: #3f3f3f;
+    --dt-border: rgba(255, 255, 255, 0.12);
+    --dt-text: #f1f1f1;
+    --dt-text-muted: #aaaaaa;
+    --dt-accent: #ff0033;
+  }
+
+  html {
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: 'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif;
+  }
+
+  .font-mono-nums {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom subtle scrollbars matching modern video platforms */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(144, 144, 144, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(144, 144, 144, 0.55);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

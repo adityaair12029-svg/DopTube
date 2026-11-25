@@ -1,0 +1,6 @@
+{
+  "name": "DopTube",
+  "description": "India's next-generation video sharing and streaming platform with native creator hosting, FFmpeg HLS streaming, and regional language discovery.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
