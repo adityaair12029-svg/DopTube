@@ -39,7 +39,6 @@ export interface VideoItem {
   status: string;
   sourceType: 'native' | 'external';
   externalEmbedUrl?: string;
-  externalOriginalUrl?: string;
   isShort: boolean;
   isLive: boolean;
   views: number;
@@ -54,6 +53,78 @@ export interface VideoItem {
   inWatchLater?: boolean;
 }
 
+export interface UserPreferences {
+  preferredLanguages: string[];
+  preferredCategories: string[];
+  selectedInterests: string[];
+  preferredFormat: string;
+  personalizationEnabled: boolean;
+  infiniteScrollEnabled: boolean;
+  autoplayEnabled: boolean;
+  onboardingCompleted: boolean;
+}
+
+export interface UserInterest {
+  topic: string;
+  score: number;
+  source: string;
+  updatedAt: string;
+}
+
+export interface BlockedTopic {
+  topic: string;
+  createdAt: string;
+}
+
+export interface BlockedCreator {
+  channelId: string;
+  channelName: string;
+  createdAt: string;
+}
+
+export interface HomepageSection {
+  id: string;
+  title: string;
+  videos: VideoItem[];
+}
+
+export interface MusicTrack {
+  id: string;
+  videoId: string | null;
+  channelId: string;
+  title: string;
+  artistName: string;
+  albumName: string;
+  audioUrl: string;
+  coverUrl: string;
+  durationSec: number;
+  language: string;
+  genre: string;
+  likes: number;
+  plays: number;
+  isLiked?: boolean;
+  createdAt: string;
+}
+
+export interface MusicMix {
+  id: string;
+  title: string;
+  subtitle: string;
+  coverUrl: string;
+  tracks: MusicTrack[];
+}
+
+export interface RecommendationAnalytics {
+  totalImpressions: number;
+  totalClicks: number;
+  ctrPercent: number;
+  completionRatePercent: number;
+  notInterestedCount: number;
+  dontRecommendCreatorCount: number;
+  anomalyFlags: number;
+  topTopics: Array<{ topic: string; avgScore: number; usersCount: number }>;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -64,6 +135,7 @@ export interface UserProfile {
   restrictedMode: boolean;
   historyPaused: boolean;
   createdAt: string;
+  preferences?: UserPreferences;
   channel: {
     id: string;
     name: string;
@@ -123,6 +195,9 @@ export type AppPage =
   | 'search'
   | 'watch'
   | 'channel'
+  | 'you'
+  | 'music'
+  | 'queue'
   | 'history'
   | 'playlists'
   | 'watch-later'

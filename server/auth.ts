@@ -1,13 +1,14 @@
+import { randomBytes } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { db } from './db.ts';
 import { verifySessionToken, type SessionPayload } from './domain.ts';
 
 export const SESSION_COOKIE = 'doptube_session';
 
-const FALLBACK_DEV_SECRET = 'doptube-india-dev-session-secret-key-2026';
+const RUNTIME_SESSION_SECRET = randomBytes(32).toString('hex');
 
 export function getSessionSecret(): string {
-  return process.env.SESSION_SECRET || FALLBACK_DEV_SECRET;
+  return process.env.SESSION_SECRET || RUNTIME_SESSION_SECRET;
 }
 
 export interface AuthedRequest extends Request {
@@ -22,14 +23,20 @@ export function parseCookies(cookieHeader?: string): Record<string, string> {
     if (idx <= 0) continue;
     const key = part.slice(0, idx).trim();
     const val = part.slice(idx + 1).trim();
-    out[key] = decodeURIComponent(val);
+    try {
+      out[key] = decodeURIComponent(val);
+    } catch {
+      out[key] = val;
+    }
   }
   return out;
 }
 
 export function attachAuth(req: AuthedRequest, _res: Response, next: NextFunction) {
   const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[SESSION_COOKIE];
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const token = cookies[SESSION_COOKIE] || bearerToken;
   if (token) {
     const payload = verifySessionToken(token, getSessionSecret());
     if (payload) {
@@ -64,17 +71,41 @@ export function requireAdmin(req: AuthedRequest, res: Response, next: NextFuncti
   next();
 }
 
-export function setSessionCookie(res: Response, token: string) {
-  res.cookie(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
+export function setSessionCookie(res: Response, token: string, req?: Request) {
+  const isHttps =
+    Boolean(req?.secure) ||
+    req?.headers['x-forwarded-proto'] === 'https' ||
+    (process.env.APP_URL || '').startsWith('https://');
+
+  if (isHttps) {
+    res.cookie(SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      partitioned: true,
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+  } else {
+    res.cookie(SESSION_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+  }
 }
 
-export function clearSessionCookie(res: Response) {
-  res.clearCookie(SESSION_COOKIE, { path: '/' });
+export function clearSessionCookie(res: Response, req?: Request) {
+  const isHttps =
+    Boolean(req?.secure) ||
+    req?.headers['x-forwarded-proto'] === 'https' ||
+    (process.env.APP_URL || '').startsWith('https://');
+
+  res.clearCookie(SESSION_COOKIE, {
+    path: '/',
+    ...(isHttps ? { secure: true, sameSite: 'none', partitioned: true } : { sameSite: 'lax' }),
+  });
 }
 
 export function securityHeaders(_req: Request, res: Response, next: NextFunction) {

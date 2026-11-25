@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
-import type { UserProfile } from '../types';
+import { ShieldCheck, Sparkles } from 'lucide-react';
+import type { RecommendationAnalytics, UserProfile } from '../types';
 import { apiFetch } from '../lib/api';
 
 interface AdminOverview {
@@ -18,17 +18,25 @@ interface AdminOverview {
 
 export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: string) => void }> = ({ user, onToast }) => {
   const [data, setData] = useState<AdminOverview | null>(null);
+  const [aiAnalytics, setAiAnalytics] = useState<RecommendationAnalytics | null>(null);
   const [error, setError] = useState('');
 
   const load = () => {
-    apiFetch<AdminOverview>('/api/admin/overview')
-      .then(setData)
+    if (!user || user.role !== 'admin') return;
+    Promise.all([
+      apiFetch<AdminOverview>('/api/admin/overview'),
+      apiFetch<RecommendationAnalytics>('/api/analytics/recommendations').catch(() => null),
+    ])
+      .then(([overview, analytics]) => {
+        setData(overview);
+        setAiAnalytics(analytics);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'Admin access denied.'));
   };
 
   useEffect(() => {
     load();
-  }, [user?.id]);
+  }, [user?.id, user?.role]);
 
   if (!user || user.role !== 'admin') {
     return (
@@ -36,7 +44,7 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
         <ShieldCheck className="w-10 h-10 mx-auto text-[#ff0033] mb-3" />
         <h2 className="text-xl font-bold">Administrator Access Required</h2>
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
-          {error || 'Sign in with an administrator account (admin@doptube.in) to access moderation and audit tools.'}
+          {error || 'Sign in with your Google Admin account (doptails@gmail.com) to access moderation, AI recommendation analytics, and audit tools.'}
         </p>
       </div>
     );
@@ -45,11 +53,11 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
   if (!data) return <div className="p-8 text-sm">Loading admin console...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 pb-20 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 pb-24 space-y-8">
       <div>
         <h1 className="text-2xl font-bold">DopTube Admin & Moderation Console</h1>
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
-          Role-protected trust, safety, copyright compliance, and platform monitoring.
+          Role-protected trust, safety, copyright compliance, AI recommendation monitoring, and platform auditing.
         </p>
       </div>
 
@@ -66,6 +74,49 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
           </div>
         ))}
       </div>
+
+      {/* AI Recommendation Engine Analytics */}
+      {aiAnalytics && (
+        <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-[#ff0033]" />
+            <h2 className="font-semibold text-base">AI Recommendation Engine Analytics</h2>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            {[
+              ['Total Impressions', aiAnalytics.totalImpressions],
+              ['Clicks', aiAnalytics.totalClicks],
+              ['CTR', `${aiAnalytics.ctrPercent}%`],
+              ['Completion Rate', `${aiAnalytics.completionRatePercent}%`],
+              ['Not Interested', aiAnalytics.notInterestedCount],
+              ['Creator Blocks', aiAnalytics.dontRecommendCreatorCount],
+              ['Anomaly Flags', aiAnalytics.anomalyFlags],
+            ].map(([label, val]) => (
+              <div key={String(label)} className="p-3 rounded-lg bg-neutral-100 dark:bg-[#181818]">
+                <p className="text-[11px] text-[#606060] dark:text-[#aaaaaa]">{label}</p>
+                <p className="text-lg font-bold font-mono-nums mt-0.5">{val}</p>
+              </div>
+            ))}
+          </div>
+
+          {aiAnalytics.topTopics.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-[#606060] dark:text-[#aaaaaa] mb-2">Top User Interests</p>
+              <div className="flex flex-wrap gap-2">
+                {aiAnalytics.topTopics.map((topic) => (
+                  <span
+                    key={topic.topic}
+                    className="px-3 py-1 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium"
+                  >
+                    {topic.topic} · avg {topic.avgScore}% ({topic.usersCount} users)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Content Reports Queue */}

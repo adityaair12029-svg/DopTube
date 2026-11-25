@@ -6,6 +6,15 @@ import express from 'express';
 import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
 import {
+  buildUserAiContext,
+  ensureUserPreferencesRow,
+  getUserPreferencesPayload,
+  hydrateVideoRow,
+  toCandidate,
+  type VideoDbRow as VideoRow,
+} from './server/aiService.ts';
+import { registerAiAndLibraryRoutes } from './server/aiRoutes.ts';
+import {
   attachAuth,
   clearSessionCookie,
   getSessionSecret,
@@ -26,7 +35,6 @@ import {
 } from './server/discovery.ts';
 import {
   filterAndSortVideos,
-  hashPassword,
   INDIAN_LANGUAGES,
   rankVideos,
   signSessionToken,
@@ -37,17 +45,18 @@ import {
   VIDEO_CATEGORIES,
   type RankableVideo,
 } from './server/domain.ts';
+import { verifyFirebaseGoogleToken } from './server/firebaseAdmin.ts';
 import {
   ensureMediaDirs,
   extractThumbnail,
-  generateSeedVideoClip,
   HLS_DIR,
-  MEDIA_DIR,
   probeMediaFile,
   THUMB_DIR,
   transcodeToHls,
   UPLOAD_DIR,
 } from './server/media.ts';
+import { registerMusicRoutes } from './server/musicRoutes.ts';
+import { validateContentCandidate } from './server/validation.ts';
 
 ensureMediaDirs();
 seedDatabaseIfEmpty();
@@ -87,80 +96,7 @@ const upload = multer({
   },
 });
 
-interface VideoRow {
-  id: string;
-  channel_id: string;
-  title: string;
-  description: string;
-  category: string;
-  language: string;
-  tags_json: string;
-  thumbnail_url: string;
-  video_url: string;
-  hls_url: string | null;
-  duration_sec: number;
-  visibility: string;
-  status: string;
-  source_type: 'native' | 'external';
-  external_ref: string | null;
-  is_short: number;
-  is_live: number;
-  views: number;
-  likes: number;
-  dislikes: number;
-  created_at: string;
-  channel_name: string;
-  channel_handle: string;
-  channel_avatar: string;
-  channel_verified: number;
-  subscriber_count: number;
-}
-
-function hydrateVideoRow(r: VideoRow) {
-  let tags: string[] = [];
-  try {
-    tags = JSON.parse(r.tags_json || '[]');
-  } catch {
-    tags = [];
-  }
-  const extRef = r.external_ref || (r.id.startsWith('ext_') ? r.id.slice(4) : '');
-  return {
-    id: r.id,
-    channelId: r.channel_id,
-    channelName: r.channel_name,
-    channelHandle: r.channel_handle,
-    channelAvatar: r.channel_avatar,
-    channelVerified: r.channel_verified === 1,
-    subscriberCount: r.subscriber_count,
-    title: r.title,
-    description: r.description,
-    category: r.category,
-    language: r.language,
-    tags,
-    thumbnailUrl: r.thumbnail_url,
-    videoUrl: r.video_url,
-    hlsUrl: r.hls_url,
-    durationSec: r.duration_sec,
-    visibility: r.visibility,
-    status: r.status,
-    sourceType: r.source_type,
-    ...(r.source_type === 'external' && extRef
-      ? {
-          externalEmbedUrl:
-            r.is_short === 1
-              ? `https://www.youtube.com/embed/${extRef}?autoplay=1&loop=1&playlist=${extRef}&rel=0`
-              : `https://www.youtube.com/embed/${extRef}?autoplay=1&rel=0`,
-          externalOriginalUrl: `https://www.youtube.com/watch?v=${extRef}`,
-        }
-      : {}),
-    isShort: r.is_short === 1,
-    isLive: r.is_live === 1,
-    views: r.views,
-    likes: r.likes,
-    dislikes: r.dislikes,
-    createdAt: r.created_at,
-  };
-}
+// VideoRow and hydrateVideoRow imported from ./server/aiService.ts
 
 function ensureExternalChannelStub(channel: {
   id: string;
@@ -300,6 +236,7 @@ function getUserPayload(userId: string) {
   `).get(userId) as Record<string, unknown> | undefined;
 
   if (!user) return null;
+  const preferences = getUserPreferencesPayload(userId);
   return {
     id: user.id,
     name: user.name,
@@ -310,6 +247,7 @@ function getUserPayload(userId: string) {
     restrictedMode: user.restricted_mode === 1,
     historyPaused: user.history_paused === 1,
     createdAt: user.created_at,
+    preferences,
     channel: user.channel_id
       ? {
           id: user.channel_id,
@@ -342,87 +280,101 @@ app.get('/api/auth/me', (req: AuthedRequest, res) => {
   res.json({ user });
 });
 
-app.post('/api/auth/register', rateLimit(20, 60_000), (req, res) => {
-  const { name, email, password, preferredLanguage } = req.body as {
-    name?: string;
-    email?: string;
-    password?: string;
-    preferredLanguage?: string;
-  };
-  if (!name || name.trim().length < 2) {
-    res.status(400).json({ error: 'Name must be at least 2 characters.' });
-    return;
-  }
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-    res.status(400).json({ error: 'Please provide a valid email address.' });
-    return;
-  }
-  if (!password || password.length < 6) {
-    res.status(400).json({ error: 'Password must be at least 6 characters.' });
+const ADMIN_EMAIL = 'doptails@gmail.com';
+
+app.post('/api/auth/google', rateLimit(30, 60_000), async (req, res) => {
+  const { idToken } = req.body as { idToken?: string };
+  if (!idToken || typeof idToken !== 'string') {
+    res.status(400).json({ error: 'Google ID token is required.' });
     return;
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
-  if (existing) {
-    res.status(409).json({ error: 'An account with this email already exists.' });
+  let identity;
+  try {
+    identity = await verifyFirebaseGoogleToken(idToken);
+  } catch (err) {
+    res.status(401).json({ error: err instanceof Error ? err.message : 'Google token verification failed.' });
     return;
   }
 
-  const userId = `u_${randomUUID().slice(0, 10)}`;
-  const channelId = `ch_${randomUUID().slice(0, 10)}`;
-  const cleanHandleBase = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'creator';
-  const handle = `@${cleanHandleBase}${Math.floor(100 + Math.random() * 899)}`;
-  const avatarUrl = `/api/avatars/${channelId}.svg`;
+  if (!identity) {
+    res.status(401).json({ error: 'Unable to verify verified Google account.' });
+    return;
+  }
+
+  const normalizedEmail = identity.email.trim().toLowerCase();
+  const isBootstrapAdmin = normalizedEmail === ADMIN_EMAIL;
   const nowIso = new Date().toISOString();
-  const lang = INDIAN_LANGUAGES.includes(preferredLanguage as (typeof INDIAN_LANGUAGES)[number])
-    ? preferredLanguage!
-    : 'Hindi';
 
-  db.prepare(`
-    INSERT INTO users (id, name, email, password_hash, avatar_url, role, preferred_language, created_at)
-    VALUES (?, ?, ?, ?, ?, 'creator', ?, ?)
-  `).run(userId, name.trim(), normalizedEmail, hashPassword(password), avatarUrl, lang, nowIso);
-
-  db.prepare(`
-    INSERT INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, '#1f1f23', 0, 0, ?)
-  `).run(channelId, userId, name.trim(), handle, `Official DopTube channel of ${name.trim()}.`, avatarUrl, nowIso);
-
-  const token = signSessionToken(
-    { userId, role: 'creator', exp: Date.now() + 7 * 24 * 60 * 60 * 1000 },
-    getSessionSecret()
-  );
-  setSessionCookie(res, token);
-  logAudit(userId, 'USER_REGISTER', 'user', userId);
-  res.status(201).json({ user: getUserPayload(userId) });
-});
-
-app.post('/api/auth/login', rateLimit(30, 60_000), (req, res) => {
-  const { email, password } = req.body as { email?: string; password?: string };
-  if (!email || !password) {
-    res.status(400).json({ error: 'Email and password are required.' });
-    return;
-  }
-  const row = db.prepare('SELECT id, password_hash, role FROM users WHERE email = ?').get(email.trim().toLowerCase()) as
-    | { id: string; password_hash: string; role: 'user' | 'creator' | 'admin' }
+  let existingUser = db
+    .prepare('SELECT id, role, avatar_url, name FROM users WHERE firebase_uid = ? OR email = ?')
+    .get(identity.uid, normalizedEmail) as
+    | { id: string; role: 'user' | 'creator' | 'admin'; avatar_url: string; name: string }
     | undefined;
-  if (!row || !verifyPassword(password, row.password_hash)) {
-    res.status(401).json({ error: 'Invalid email or password.' });
-    return;
+
+  let userId: string;
+  let finalRole: 'user' | 'creator' | 'admin';
+
+  if (existingUser) {
+    userId = existingUser.id;
+    finalRole = isBootstrapAdmin ? 'admin' : existingUser.role;
+    db.prepare(`
+      UPDATE users
+      SET firebase_uid = ?,
+          name = ?,
+          avatar_url = CASE WHEN ? != '' THEN ? ELSE avatar_url END,
+          role = ?,
+          email_verified = 1
+      WHERE id = ?
+    `).run(identity.uid, identity.name, identity.picture, identity.picture, finalRole, userId);
+  } else {
+    userId = `u_${randomUUID().slice(0, 10)}`;
+    finalRole = isBootstrapAdmin ? 'admin' : 'creator';
+    const channelId = `ch_${randomUUID().slice(0, 10)}`;
+    const avatarUrl = identity.picture || `/api/avatars/${channelId}.svg`;
+
+    db.prepare(`
+      INSERT INTO users (id, firebase_uid, name, email, password_hash, avatar_url, role, preferred_language, email_verified, created_at)
+      VALUES (?, ?, ?, ?, 'google_oauth', ?, ?, 'English', 1, ?)
+    `).run(userId, identity.uid, identity.name, normalizedEmail, avatarUrl, finalRole, nowIso);
+
+    const cleanBase = identity.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 18) || 'creator';
+    let handle = `@${cleanBase}`;
+    if (db.prepare('SELECT id FROM channels WHERE handle = ?').get(handle)) {
+      handle = `@${cleanBase}${Math.floor(100 + Math.random() * 899)}`;
+    }
+
+    db.prepare(`
+      INSERT INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, '#1f1f23', 0, 0, ?)
+    `).run(channelId, userId, identity.name, handle, `Official DopTube channel of ${identity.name}.`, avatarUrl, nowIso);
   }
 
+  // Ensure user always has a channel & preferences row
+  const hasChannel = db.prepare('SELECT id FROM channels WHERE user_id = ?').get(userId);
+  if (!hasChannel) {
+    const channelId = `ch_${randomUUID().slice(0, 10)}`;
+    const cleanBase = identity.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 18) || 'creator';
+    const handle = `@${cleanBase}${Math.floor(100 + Math.random() * 899)}`;
+    const avatarUrl = identity.picture || `/api/avatars/${channelId}.svg`;
+    db.prepare(`
+      INSERT INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, '#1f1f23', 0, 0, ?)
+    `).run(channelId, userId, identity.name, handle, `Official DopTube channel of ${identity.name}.`, avatarUrl, nowIso);
+  }
+  ensureUserPreferencesRow(userId, 'English');
+
   const token = signSessionToken(
-    { userId: row.id, role: row.role, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 },
+    { userId, role: finalRole, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 },
     getSessionSecret()
   );
-  setSessionCookie(res, token);
-  logAudit(row.id, 'USER_LOGIN', 'user', row.id);
-  res.json({ user: getUserPayload(row.id) });
+  setSessionCookie(res, token, req);
+  logAudit(userId, 'GOOGLE_LOGIN', 'user', userId, { email: normalizedEmail });
+  res.json({ user: getUserPayload(userId) });
 });
 
-app.post('/api/auth/logout', (_req, res) => {
-  clearSessionCookie(res);
+app.post('/api/auth/logout', (req, res) => {
+  clearSessionCookie(res, req);
   res.json({ ok: true });
 });
 
@@ -439,6 +391,12 @@ app.patch('/api/auth/profile', requireAuth, (req: AuthedRequest, res) => {
   }
   if (preferredLanguage && INDIAN_LANGUAGES.includes(preferredLanguage as (typeof INDIAN_LANGUAGES)[number])) {
     db.prepare('UPDATE users SET preferred_language = ? WHERE id = ?').run(preferredLanguage, uid);
+    ensureUserPreferencesRow(uid, preferredLanguage);
+    db.prepare('UPDATE user_preferences SET preferred_languages_json = ?, updated_at = ? WHERE user_id = ?').run(
+      JSON.stringify([preferredLanguage]),
+      new Date().toISOString(),
+      uid
+    );
   }
   if (typeof restrictedMode === 'boolean') {
     db.prepare('UPDATE users SET restricted_mode = ? WHERE id = ?').run(restrictedMode ? 1 : 0, uid);
@@ -449,26 +407,10 @@ app.patch('/api/auth/profile', requireAuth, (req: AuthedRequest, res) => {
   res.json({ user: getUserPayload(uid) });
 });
 
-app.post('/api/auth/reset-password', requireAuth, (req: AuthedRequest, res) => {
-  const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
-  if (!currentPassword || !newPassword || newPassword.length < 6) {
-    res.status(400).json({ error: 'New password must be at least 6 characters.' });
-    return;
-  }
-  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.auth!.userId) as { password_hash: string };
-  if (!verifyPassword(currentPassword, row.password_hash)) {
-    res.status(400).json({ error: 'Current password is incorrect.' });
-    return;
-  }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.auth!.userId);
-  logAudit(req.auth!.userId, 'PASSWORD_RESET', 'user', req.auth!.userId);
-  res.json({ ok: true });
-});
-
 app.delete('/api/auth/account', requireAuth, (req: AuthedRequest, res) => {
   const uid = req.auth!.userId;
   db.prepare('DELETE FROM users WHERE id = ?').run(uid);
-  clearSessionCookie(res);
+  clearSessionCookie(res, req);
   res.json({ ok: true });
 });
 
@@ -523,7 +465,7 @@ app.get('/api/hls/:videoId/:file', (req, res) => {
   res.sendFile(target);
 });
 
-app.get('/api/stream/:id', async (req, res) => {
+app.get('/api/stream/:id', (req, res) => {
   const videoId = path.basename(req.params.id);
   const video = db.prepare('SELECT id, video_url, thumbnail_url, is_short FROM videos WHERE id = ?').get(videoId) as
     | { id: string; video_url: string; thumbnail_url: string; is_short: number }
@@ -534,28 +476,14 @@ app.get('/api/stream/:id', async (req, res) => {
     return;
   }
 
-  let filePath = path.join(UPLOAD_DIR, `${videoId}.mp4`);
-  if (!fs.existsSync(filePath)) {
-    // Check for original uploaded extension
-    const uploadedMatch = fs.readdirSync(UPLOAD_DIR).find((f) => f.startsWith(`${videoId}.`));
-    if (uploadedMatch) {
-      filePath = path.join(UPLOAD_DIR, uploadedMatch);
-    } else {
-      const cachedSeed = path.join(MEDIA_DIR, `${videoId}.mp4`);
-      if (!fs.existsSync(cachedSeed)) {
-        const imgPath = video.thumbnail_url.startsWith('/src/') ? video.thumbnail_url : undefined;
-        await generateSeedVideoClip({
-          videoId,
-          imagePath: imgPath,
-          durationSec: video.is_short === 1 ? 8 : 10,
-          isShort: video.is_short === 1,
-        });
-      }
-      filePath = cachedSeed;
-    }
+  const baseDir = path.resolve(UPLOAD_DIR);
+  const uploadedMatch = fs.readdirSync(baseDir).find((f) => f.startsWith(`${videoId}.`));
+  if (!uploadedMatch) {
+    res.status(404).json({ error: 'Uploaded media file not found.' });
+    return;
   }
-
-  if (!fs.existsSync(filePath)) {
+  const filePath = path.resolve(baseDir, uploadedMatch);
+  if (!filePath.startsWith(baseDir + path.sep) || !fs.existsSync(filePath)) {
     res.status(404).end();
     return;
   }
@@ -599,15 +527,16 @@ app.get('/api/stream/:id', async (req, res) => {
 
 app.get('/api/videos', async (req: AuthedRequest, res) => {
   const { category = 'All', language = 'All', shorts, trending, sort, q, nativeOnly } = req.query as Record<string, string | undefined>;
+  const ctx = buildUserAiContext(req.auth?.userId);
   const rows = db.prepare(`
     SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
-           c.verified as channel_verified, c.subscriber_count
+           c.verified as channel_verified, c.subscriber_count, c.user_id as owner_user_id
     FROM videos v
     JOIN channels c ON c.id = v.channel_id
     WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'native'
   `).all() as unknown as VideoRow[];
 
-  let items = rows.map(hydrateVideoRow);
+  let items = rows.map(hydrateVideoRow).filter((v) => validateContentCandidate(toCandidate(v), ctx.validation).valid);
   if (shorts === '1') {
     items = items.filter((v) => v.isShort);
   } else if (shorts === '0') {
@@ -631,16 +560,17 @@ app.get('/api/videos', async (req: AuthedRequest, res) => {
     return;
   }
 
-  const externalItems = q
-    ? await fetchExternalDiscovery(q, language)
-    : await fetchExternalFeed({
-        category,
-        language,
-        trending: trending === '1',
-        shorts: shorts === '1',
-      });
+  const externalItems = (
+    q
+      ? await fetchExternalDiscovery(q, language)
+      : await fetchExternalFeed({
+          category,
+          language,
+          trending: trending === '1',
+          shorts: shorts === '1',
+        })
+  ).filter((v) => validateContentCandidate(toCandidate(v), ctx.validation).valid);
 
-  // Blend external API videos with DopTube native videos (deduplicated by id)
   const seen = new Set(rankedNative.map((v) => v.id));
   const freshExternal = externalItems.filter((v) => !seen.has(v.id));
 
@@ -648,7 +578,6 @@ app.get('/api/videos', async (req: AuthedRequest, res) => {
   if (trending === '1') {
     combined = [...rankedNative, ...freshExternal].sort((a, b) => b.views - a.views);
   } else {
-    // Interleave external API videos right alongside native videos so both appear prominently
     combined = [];
     const maxLen = Math.max(rankedNative.length, freshExternal.length);
     for (let i = 0; i < maxLen; i++) {
@@ -1403,7 +1332,7 @@ app.get('/api/playlists', requireAuth, (req: AuthedRequest, res) => {
     JOIN videos v ON v.id = pv.video_id
     JOIN channels c ON c.id = v.channel_id
     WHERE pv.playlist_id = ?
-    ORDER BY pv.added_at DESC
+    ORDER BY pv.position ASC, pv.added_at ASC
   `);
 
   res.json({
@@ -1444,9 +1373,13 @@ app.post('/api/playlists/:id/videos', requireAuth, async (req: AuthedRequest, re
     return;
   }
   await ensureExternalVideoRecord(videoId);
-  db.prepare('INSERT OR IGNORE INTO playlist_videos (playlist_id, video_id, position, added_at) VALUES (?, ?, 0, ?)').run(
+  const maxPos = (
+    db.prepare('SELECT COALESCE(MAX(position), -1) as m FROM playlist_videos WHERE playlist_id = ?').get(req.params.id) as { m: number }
+  ).m;
+  db.prepare('INSERT OR IGNORE INTO playlist_videos (playlist_id, video_id, position, added_at) VALUES (?, ?, ?, ?)').run(
     req.params.id,
     videoId,
+    maxPos + 1,
     new Date().toISOString()
   );
   res.json({ ok: true });
@@ -1479,6 +1412,9 @@ app.post('/api/recommendations/reset', requireAuth, (req: AuthedRequest, res) =>
   const uid = req.auth!.userId;
   db.prepare('DELETE FROM watch_history WHERE user_id = ?').run(uid);
   db.prepare('DELETE FROM search_history WHERE user_id = ?').run(uid);
+  db.prepare('DELETE FROM user_interests WHERE user_id = ?').run(uid);
+  db.prepare('DELETE FROM user_events WHERE user_id = ?').run(uid);
+  db.prepare('DELETE FROM user_feedback WHERE user_id = ?').run(uid);
   res.json({ ok: true });
 });
 
@@ -1659,6 +1595,10 @@ app.patch('/api/admin/users/:id/role', requireAdmin, (req: AuthedRequest, res) =
   logAudit(req.auth!.userId, 'USER_ROLE_CHANGE', 'user', req.params.id, { role });
   res.json({ ok: true });
 });
+
+// Register DopTube AI Recommendation, Behavior, Preferences, Queue & Music Routes
+registerAiAndLibraryRoutes(app, ensureExternalVideoRecord);
+registerMusicRoutes(app);
 
 // =========================================================================
 // VITE MIDDLEWARE (DEV) OR STATIC ASSETS (PROD)

@@ -1,6 +1,6 @@
-import React from 'react';
-import { MoreVertical, Zap } from 'lucide-react';
-import type { VideoItem } from '../types';
+import React, { useEffect, useRef } from 'react';
+import { Loader2, MoreVertical, Zap } from 'lucide-react';
+import type { HomepageSection, VideoItem } from '../types';
 import { formatViews } from '../lib/format';
 import { CategoryBar } from '../components/CategoryBar';
 import { VideoCard } from '../components/VideoCard';
@@ -8,12 +8,16 @@ import { VideoCard } from '../components/VideoCard';
 interface HomeViewProps {
   videos: VideoItem[];
   shorts: VideoItem[];
-  continueWatching: VideoItem[];
+  sections: HomepageSection[];
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+  infiniteScrollEnabled: boolean;
   selectedCategory: string;
   selectedLanguage: string;
   onSelectCategory: (cat: string) => void;
   onSelectLanguage: (lang: string) => void;
+  onLoadMore: () => void;
   onWatch: (videoId: string) => void;
   onOpenShort: (shortId: string) => void;
   onOpenChannel: (channelId: string) => void;
@@ -22,17 +26,26 @@ interface HomeViewProps {
   onShare: (video: VideoItem) => void;
   onReport: (video: VideoItem) => void;
   onMiniPlayer: (video: VideoItem) => void;
+  onPlayNext: (videoId: string) => void;
+  onAddToQueue: (videoId: string) => void;
+  onNotInterested: (videoId: string) => void;
+  onDontRecommendCreator: (channelId: string, channelName: string) => void;
+  onImpressions?: (videoIds: string[]) => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   videos,
   shorts,
-  continueWatching,
+  sections,
   loading,
+  loadingMore,
+  hasMore,
+  infiniteScrollEnabled,
   selectedCategory,
   selectedLanguage,
   onSelectCategory,
   onSelectLanguage,
+  onLoadMore,
   onWatch,
   onOpenShort,
   onOpenChannel,
@@ -41,21 +54,71 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onShare,
   onReport,
   onMiniPlayer,
+  onPlayNext,
+  onAddToQueue,
+  onNotInterested,
+  onDontRecommendCreator,
+  onImpressions,
 }) => {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const reportedIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!onImpressions || videos.length === 0) return;
+    const fresh = videos.map((v) => v.id).filter((id) => !reportedIdsRef.current.has(id));
+    if (fresh.length > 0) {
+      fresh.forEach((id) => reportedIdsRef.current.add(id));
+      onImpressions(fresh.slice(0, 20));
+    }
+  }, [videos, onImpressions]);
+
+  useEffect(() => {
+    if (!infiniteScrollEnabled || !hasMore || loadingMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: '250px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [infiniteScrollEnabled, hasMore, loadingMore, onLoadMore]);
+
+  const cardActions = {
+    onWatch,
+    onOpenChannel,
+    onSaveWatchLater,
+    onSavePlaylist,
+    onShare,
+    onReport,
+    onMiniPlayer,
+    onPlayNext,
+    onAddToQueue,
+    onNotInterested,
+    onDontRecommendCreator,
+  };
+
   const topRow = videos.slice(0, 6);
   const restVideos = videos.slice(6);
+  const isFiltered = selectedCategory !== 'All' || selectedLanguage !== 'All';
 
   return (
-    <div className="px-3 sm:px-6 pb-20 md:pb-10">
-      <CategoryBar
-        selectedCategory={selectedCategory}
-        selectedLanguage={selectedLanguage}
-        onSelectCategory={onSelectCategory}
-        onSelectLanguage={onSelectLanguage}
-      />
+    <div className="sm:px-6 pb-24 md:pb-12">
+      <div className="px-3 sm:px-0">
+        <CategoryBar
+          selectedCategory={selectedCategory}
+          selectedLanguage={selectedLanguage}
+          onSelectCategory={onSelectCategory}
+          onSelectLanguage={onSelectLanguage}
+        />
+      </div>
 
       {loading ? (
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
+        <div className="mt-4 px-3 sm:px-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
           {Array.from({ length: 8 }).map((_, idx) => (
             <div key={idx} className="animate-pulse">
               <div className="aspect-video rounded-xl bg-neutral-200 dark:bg-[#222222]" />
@@ -70,66 +133,60 @@ export const HomeView: React.FC<HomeViewProps> = ({
           ))}
         </div>
       ) : videos.length === 0 && shorts.length === 0 ? (
-        <div className="my-16 text-center max-w-md mx-auto">
-          <p className="text-lg font-semibold">No videos match your filters</p>
-          <p className="mt-1 text-sm text-[#606060] dark:text-[#aaaaaa]">
-            Try switching back to All categories or All Indian languages.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              onSelectCategory('All');
-              onSelectLanguage('All');
-            }}
-            className="mt-4 h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-[#f1f1f1] text-white dark:text-[#0f0f0f] text-sm font-medium cursor-pointer"
-          >
-            Reset filters
-          </button>
+        <div className="my-20 text-center max-w-md mx-auto px-4">
+          {isFiltered ? (
+            <>
+              <p className="text-lg font-semibold">No videos match your filters</p>
+              <p className="mt-1 text-sm text-[#606060] dark:text-[#aaaaaa]">
+                Try switching back to All categories or All Languages.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelectCategory('All');
+                  onSelectLanguage('All');
+                }}
+                className="mt-4 h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-[#f1f1f1] text-white dark:text-[#0f0f0f] text-sm font-medium cursor-pointer"
+              >
+                Reset filters
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-semibold">No videos available yet. Check back soon.</p>
+              <p className="mt-1.5 text-sm text-[#606060] dark:text-[#aaaaaa]">
+                Sign in with Google to upload your own MP4/WebM videos or explore Indian creators once connected.
+              </p>
+            </>
+          )}
         </div>
       ) : (
         <>
-          {/* Continue Watching Strip when available */}
-          {continueWatching.length > 0 && selectedCategory === 'All' && selectedLanguage === 'All' && (
-            <section className="mt-3 mb-7">
-              <h2 className="text-base font-bold mb-3">Continue watching</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {continueWatching.slice(0, 4).map((v) => (
-                  <VideoCard
-                    key={`cw-${v.id}`}
-                    video={v}
-                    onWatch={onWatch}
-                    onOpenChannel={onOpenChannel}
-                    onSaveWatchLater={onSaveWatchLater}
-                    onSavePlaylist={onSavePlaylist}
-                    onShare={onShare}
-                    onReport={onReport}
-                    onMiniPlayer={onMiniPlayer}
-                  />
-                ))}
-              </div>
+          {/* Conditional AI Sections (Continue watching, Subscriptions, Interest Spotlight, Trending India) */}
+          {!isFiltered &&
+            sections.slice(0, 2).map((sec) => (
+              <section key={sec.id} className="mt-4 mb-7">
+                <h2 className="text-base font-bold mb-3 px-3 sm:px-0">{sec.title}</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-6">
+                  {sec.videos.map((v) => (
+                    <VideoCard key={`${sec.id}-${v.id}`} video={v} {...cardActions} />
+                  ))}
+                </div>
+              </section>
+            ))}
+
+          {/* Primary Personalized Feed Grid */}
+          {topRow.length > 0 && (
+            <section className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
+              {topRow.map((video) => (
+                <VideoCard key={video.id} video={video} {...cardActions} />
+              ))}
             </section>
           )}
 
-          {/* Primary Video Grid */}
-          <section className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
-            {topRow.map((video) => (
-              <VideoCard
-                key={video.id}
-                video={video}
-                onWatch={onWatch}
-                onOpenChannel={onOpenChannel}
-                onSaveWatchLater={onSaveWatchLater}
-                onSavePlaylist={onSavePlaylist}
-                onShare={onShare}
-                onReport={onReport}
-                onMiniPlayer={onMiniPlayer}
-              />
-            ))}
-          </section>
-
-          {/* Shorts Shelf (matching screenshot layout) */}
+          {/* Shorts Shelf */}
           {shorts.length > 0 && (
-            <section className="my-10">
+            <section className="my-10 px-3 sm:px-0">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <span className="w-6 h-6 rounded-md bg-[#ff0033] text-white flex items-center justify-center">
@@ -139,7 +196,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 {shorts.slice(0, 5).map((s) => (
                   <article key={s.id} className="group">
                     <button
@@ -185,24 +242,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </section>
           )}
 
-          {/* Secondary Video Grid */}
+          {/* Remaining Infinite-Scroll Personalized Videos */}
           {restVideos.length > 0 && (
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
               {restVideos.map((video) => (
-                <VideoCard
-                  key={video.id}
-                  video={video}
-                  onWatch={onWatch}
-                  onOpenChannel={onOpenChannel}
-                  onSaveWatchLater={onSaveWatchLater}
-                  onSavePlaylist={onSavePlaylist}
-                  onShare={onShare}
-                  onReport={onReport}
-                  onMiniPlayer={onMiniPlayer}
-                />
+                <VideoCard key={video.id} video={video} {...cardActions} />
               ))}
             </section>
           )}
+
+          {/* Infinite Scroll Sentinel / Manual Load More */}
+          <div ref={sentinelRef} className="mt-10 flex flex-col items-center justify-center py-4">
+            {loadingMore && (
+              <div className="flex items-center gap-2 text-sm text-[#606060] dark:text-[#aaaaaa]">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Loading more recommendations...</span>
+              </div>
+            )}
+            {!loadingMore && hasMore && !infiniteScrollEnabled && (
+              <button
+                type="button"
+                onClick={onLoadMore}
+                className="h-9 px-6 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-sm font-medium cursor-pointer"
+              >
+                Load more
+              </button>
+            )}
+            {!hasMore && videos.length > 0 && (
+              <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">You’re all caught up</p>
+            )}
+          </div>
         </>
       )}
     </div>

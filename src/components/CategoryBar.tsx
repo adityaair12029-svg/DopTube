@@ -22,7 +22,7 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
   };
 
   return (
-    <div className="sticky top-14 z-20 bg-white/95 dark:bg-[#0f0f0f]/95 backdrop-blur-sm py-2.5 flex items-center gap-2">
+    <div className="sticky top-14 z-20 bg-white/95 dark:bg-[#0f0f0f]/95 backdrop-blur-sm px-3 sm:px-0 py-2.5 flex items-center gap-2">
       <button
         type="button"
         onClick={() => scrollBy(-240)}
@@ -32,7 +32,7 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
         <ChevronLeft className="w-4 h-4" />
       </button>
 
-      <div ref={scrollRef} className="flex items-center gap-2.5 overflow-x-auto no-scrollbar flex-1 py-0.5">
+      <div ref={scrollRef} className="flex items-center gap-2 overflow-x-auto no-scrollbar flex-1 py-0.5">
         {HOME_CATEGORIES.map((cat) => {
           const active = selectedCategory === cat;
           return (
@@ -40,7 +40,7 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
               key={cat}
               type="button"
               onClick={() => onSelectCategory(cat)}
-              className={`h-8 px-3 rounded-[8px] text-[14px] font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+              className={`h-8 px-3 rounded-[8px] text-[13px] sm:text-[14px] font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 active
                   ? 'bg-[#0f0f0f] text-white dark:bg-[#f1f1f1] dark:text-[#0f0f0f]'
                   : 'bg-neutral-100 text-[#0f0f0f] hover:bg-neutral-200 dark:bg-[#272727] dark:text-[#f1f1f1] dark:hover:bg-[#3f3f3f]'
@@ -68,11 +68,11 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
           aria-label="Filter by Indian language"
           value={selectedLanguage}
           onChange={(e) => onSelectLanguage(e.target.value)}
-          className="h-8 pl-7 pr-5 sm:pr-6 max-w-[116px] sm:max-w-none rounded-[8px] text-[12px] sm:text-[13px] font-medium bg-neutral-100 dark:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] border border-transparent focus:border-[#3ea6ff] focus:outline-none cursor-pointer"
+          className="h-8 pl-7 pr-2 sm:pr-4 rounded-[8px] text-[12px] sm:text-[13px] font-medium bg-neutral-100 dark:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] border border-transparent focus:border-[#3ea6ff] focus:outline-none cursor-pointer"
         >
           {INDIAN_LANGUAGES.map((lang) => (
             <option key={lang} value={lang}>
-              {lang === 'All' ? 'All Languages' : lang}
+              {lang === 'All' ? 'All langs' : lang}
             </option>
           ))}
         </select>

@@ -1,58 +1,54 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Copy, FileVideo, ImagePlus, Mic, Plus, ShieldAlert, Upload, X } from 'lucide-react';
+import { Check, Copy, FileVideo, ImagePlus, Mic, Plus, ShieldAlert, Sparkles, Upload, X } from 'lucide-react';
 import type { PlaylistItem, UserProfile, VideoItem } from '../types';
 import { apiFetch, uploadWithProgress } from '../lib/api';
 import { ALL_CATEGORIES, INDIAN_LANGUAGES } from '../lib/format';
+import { signInWithGooglePopup, syncUserProfileToFirestore } from '../firebase';
 import { DopTubeLogo } from './DopTubeLogo';
 
 export const AuthModal: React.FC<{
   open: boolean;
+  theme: 'dark' | 'light';
   onClose: () => void;
   onSuccess: (user: UserProfile) => void;
-}> = ({ open, onClose, onSuccess }) => {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [preferredLanguage, setPreferredLanguage] = useState('Hindi');
+}> = ({ open, theme, onClose, onSuccess }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   if (!open) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleSignIn = async () => {
     setError('');
     setLoading(true);
     try {
-      const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
-      const body =
-        mode === 'login' ? { email, password } : { name, email, password, preferredLanguage };
-      const res = await apiFetch<{ user: UserProfile }>(endpoint, {
+      const { idToken } = await signInWithGooglePopup();
+      const res = await apiFetch<{ user: UserProfile }>('/api/auth/google', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ idToken }),
       });
-      onSuccess(res.user);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const quickLogin = async (demoEmail: string, demoPass: string) => {
-    setError('');
-    setLoading(true);
-    try {
-      const res = await apiFetch<{ user: UserProfile }>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email: demoEmail, password: demoPass }),
-      });
+      void syncUserProfileToFirestore({
+        displayName: res.user.name,
+        handle: res.user.channel?.handle || `@${res.user.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'creator'}`,
+        avatarUrl: res.user.avatarUrl,
+        email: res.user.email,
+        preferredLanguage: res.user.preferredLanguage || 'English',
+        historyPaused: res.user.historyPaused,
+        personalizationEnabled: res.user.preferences?.personalizationEnabled ?? true,
+        restrictedMode: res.user.restrictedMode,
+        theme,
+        selectedInterests: res.user.preferences?.selectedInterests ?? [],
+      }).catch(() => {});
+
       onSuccess(res.user);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed.');
+      const message = err instanceof Error ? err.message : 'Google Sign-In failed.';
+      setError(
+        message.includes('popup-closed-by-user')
+          ? 'Sign-in was cancelled. Click Continue with Google to try again.'
+          : message
+      );
     } finally {
       setLoading(false);
     }
@@ -60,7 +56,12 @@ export const AuthModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] shadow-2xl p-6 relative">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] shadow-2xl p-6 relative"
+      >
         <button
           type="button"
           onClick={onClose}
@@ -70,13 +71,13 @@ export const AuthModal: React.FC<{
           <X className="w-4 h-4" />
         </button>
 
-        <div className="mb-5">
+        <div className="mb-6">
           <DopTubeLogo />
-          <h2 className="mt-3 text-xl font-bold">{mode === 'login' ? 'Sign in to DopTube' : 'Create your DopTube account'}</h2>
-          <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
-            {mode === 'login'
-              ? 'Access your channel, subscriptions, playlists, and Creator Studio.'
-              : 'Launch your Indian creator channel in seconds.'}
+          <h2 id="auth-modal-title" className="mt-4 text-xl font-bold">
+            Sign in to DopTube
+          </h2>
+          <p className="mt-1 text-sm text-[#606060] dark:text-[#aaaaaa]">
+            Use your verified Google account to access your channel, playlists, personalized AI feed, and DopTube Studio.
           </p>
         </div>
 
@@ -86,104 +87,172 @@ export const AuthModal: React.FC<{
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          {mode === 'register' && (
-            <div>
-              <label className="block text-xs font-medium mb-1">Full Name</label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Aarav Sharma"
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm focus:outline-none focus:border-[#3ea6ff]"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium mb-1">Email</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.in"
-              className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm focus:outline-none focus:border-[#3ea6ff]"
+        <button
+          type="button"
+          disabled={loading}
+          onClick={handleGoogleSignIn}
+          className="w-full h-11 px-4 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] hover:opacity-90 font-semibold text-sm flex items-center justify-center gap-3 transition-opacity disabled:opacity-60 cursor-pointer shadow-sm"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="#4285F4"
+              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
             />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium mb-1">Password</label>
-            <input
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Minimum 6 characters"
-              className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm focus:outline-none focus:border-[#3ea6ff]"
+            <path
+              fill="#34A853"
+              d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.08.72-2.46 1.15-4.22 1.15-3.25 0-6.01-2.2-7-5.16H1.01v3.14C3.05 21.17 7.21 24 12 24Z"
             />
-          </div>
+            <path
+              fill="#FBBC05"
+              d="M5 14.01c-.25-.72-.39-1.49-.39-2.29s.14-1.57.39-2.29V6.29H1.01A11.996 11.996 0 0 0 0 11.72c0 1.94.46 3.77 1.01 5.43l3.99-3.14Z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.05 2.83 1.01 6.87l3.99 3.14c.99-2.96 3.75-5.26 7-5.26Z"
+            />
+          </svg>
+          <span>{loading ? 'Connecting to Google...' : 'Continue with Google'}</span>
+        </button>
 
-          {mode === 'register' && (
-            <div>
-              <label className="block text-xs font-medium mb-1">Preferred Indian Language</label>
-              <select
-                value={preferredLanguage}
-                onChange={(e) => setPreferredLanguage(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
-              >
-                {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((lang) => (
-                  <option key={lang} value={lang}>
-                    {lang}
-                  </option>
-                ))}
-              </select>
+        <p className="mt-4 text-xs text-center text-[#606060] dark:text-[#aaaaaa] leading-relaxed">
+          Your Google profile creates or connects your DopTube channel automatically.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export const OnboardingModal: React.FC<{
+  open: boolean;
+  initialLanguage?: string;
+  onClose: () => void;
+  onSaved: (user: UserProfile) => void;
+}> = ({ open, initialLanguage = 'English', onClose, onSaved }) => {
+  const [preferredLanguage, setPreferredLanguage] = useState(initialLanguage);
+  const [selected, setSelected] = useState<string[]>(['Education', 'Technology', 'Music']);
+  const [saving, setSaving] = useState(false);
+
+  if (!open) return null;
+
+  const topics = [
+    'Education',
+    'Music',
+    'Gaming',
+    'Technology',
+    'Cricket',
+    'Comedy',
+    'Cooking',
+    'Travel',
+    'Science',
+    'News',
+    'Movies',
+    'Business',
+  ];
+
+  const toggleTopic = (t: string) => {
+    setSelected((prev) => (prev.includes(t) ? prev.filter((item) => item !== t) : [...prev, t]));
+  };
+
+  const submit = async (skip = false) => {
+    setSaving(true);
+    try {
+      await apiFetch('/api/preferences/interests', {
+        method: 'POST',
+        body: JSON.stringify({
+          interests: skip ? [] : selected,
+          preferredLanguage,
+          onboardingCompleted: true,
+        }),
+      });
+      const me = await apiFetch<{ user: UserProfile | null }>('/api/auth/me');
+      if (me.user) onSaved(me.user);
+      onClose();
+    } catch {
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 shadow-2xl space-y-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#ff0033] mb-1">
+              <Sparkles className="w-4 h-4" />
+              <span>DopTube AI Personalization</span>
             </div>
-          )}
-
+            <h2 className="text-xl font-bold">Customize your Indian feed</h2>
+            <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-0.5">
+              Pick your preferred language and topics so DopTube starts recommending relevant videos immediately.
+            </p>
+          </div>
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full h-10 rounded-full bg-[#ff0033] hover:bg-[#d9002b] text-white font-semibold text-sm transition-colors disabled:opacity-60 cursor-pointer"
+            type="button"
+            onClick={() => submit(true)}
+            aria-label="Skip personalization"
+            className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer"
           >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+            <X className="w-4 h-4" />
           </button>
-        </form>
+        </div>
 
-        <div className="mt-4 pt-4 border-t border-neutral-200 dark:border-[#383838] space-y-2">
-          <p className="text-xs text-[#606060] dark:text-[#aaaaaa] font-medium">Quick access accounts</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => quickLogin('demo@doptube.in', 'doptube123')}
-              className="h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#2c2c2c] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs font-medium cursor-pointer"
-            >
-              Demo Creator (@Aditya)
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => quickLogin('admin@doptube.in', 'admin123')}
-              className="h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#2c2c2c] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs font-medium cursor-pointer"
-            >
-              Admin Moderator
-            </button>
+        <div>
+          <label className="block text-xs font-semibold mb-1.5">Preferred Language</label>
+          <select
+            value={preferredLanguage}
+            onChange={(e) => setPreferredLanguage(e.target.value)}
+            className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+          >
+            {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((lang) => (
+              <option key={lang} value={lang}>
+                {lang}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold mb-2">Choose topics you enjoy</p>
+          <div className="flex flex-wrap gap-2">
+            {topics.map((topic) => {
+              const active = selected.includes(topic);
+              return (
+                <button
+                  key={topic}
+                  type="button"
+                  onClick={() => toggleTopic(topic)}
+                  className={`h-8 px-3.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    active
+                      ? 'bg-[#ff0033] text-white'
+                      : 'bg-neutral-100 dark:bg-[#2b2b2b] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a]'
+                  }`}
+                >
+                  {topic}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="mt-4 text-center text-sm">
-          {mode === 'login' ? (
-            <button type="button" onClick={() => setMode('register')} className="text-[#065fd4] dark:text-[#3ea6ff] hover:underline cursor-pointer">
-              New to DopTube? Create an account
-            </button>
-          ) : (
-            <button type="button" onClick={() => setMode('login')} className="text-[#065fd4] dark:text-[#3ea6ff] hover:underline cursor-pointer">
-              Already have an account? Sign in
-            </button>
-          )}
+        <div className="flex items-center justify-between pt-2">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => submit(true)}
+            className="text-xs font-medium text-[#606060] dark:text-[#aaaaaa] hover:underline cursor-pointer"
+          >
+            Skip for now
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => submit(false)}
+            className="h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          >
+            {saving ? 'Saving...' : 'Build my feed'}
+          </button>
         </div>
       </div>
     </div>
@@ -194,7 +263,8 @@ export const UploadModal: React.FC<{
   open: boolean;
   onClose: () => void;
   onUploaded: (videoId: string) => void;
-}> = ({ open, onClose, onUploaded }) => {
+  onOpenMusicUpload?: () => void;
+}> = ({ open, onClose, onUploaded, onOpenMusicUpload }) => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [thumbFile, setThumbFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
@@ -238,7 +308,6 @@ export const UploadModal: React.FC<{
       const { videoId } = await uploadWithProgress('/api/videos/upload', fd, setUploadPct);
       setProcessingStage('Queued for FFmpeg HLS transcoding...');
 
-      // Poll FFmpeg processing status until ready
       const poll = async () => {
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 750));
@@ -269,7 +338,21 @@ export const UploadModal: React.FC<{
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="px-6 py-4 border-b border-neutral-200 dark:border-[#383838] flex items-center justify-between">
-          <h2 className="text-lg font-bold">Upload video to DopTube</h2>
+          <div>
+            <h2 className="text-lg font-bold">Upload video to DopTube</h2>
+            {onOpenMusicUpload && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenMusicUpload();
+                }}
+                className="text-xs text-[#065fd4] dark:text-[#3ea6ff] hover:underline cursor-pointer"
+              >
+                Want to upload an MP3/M4A audio track to DopTube Music instead?
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -523,7 +606,7 @@ export const PlaylistModal: React.FC<{
       <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-5 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-base">Save video to...</h3>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Close playlist modal" className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -617,7 +700,7 @@ export const ReportModal: React.FC<{
             <ShieldAlert className="w-5 h-5 text-[#ff0033]" />
             Report or Copyright Claim
           </h3>
-          <button type="button" onClick={onClose} className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Close report modal" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -740,7 +823,7 @@ export const ShareModal: React.FC<{
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-5 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base">Share video</h3>
-          <button type="button" onClick={onClose} className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Close share dialog" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -781,7 +864,7 @@ export const VoiceSearchModal: React.FC<{
       (window as unknown as { webkitSpeechRecognition?: new () => unknown }).webkitSpeechRecognition;
 
     if (!SpeechRec) {
-      setStatus('Microphone speech recognition unavailable in this browser. Pick a quick Indian topic below:');
+      setStatus('Microphone speech recognition unavailable in this browser. Tap a quick topic below:');
       return;
     }
 
@@ -795,7 +878,7 @@ export const VoiceSearchModal: React.FC<{
     };
     rec.lang = 'en-IN';
     rec.interimResults = true;
-    setStatus('Speak now (English / Hindi)...');
+    setStatus('Speak now...');
 
     rec.onresult = (evt) => {
       const text = evt.results[0]?.[0]?.transcript ?? '';
@@ -808,12 +891,12 @@ export const VoiceSearchModal: React.FC<{
       }
     };
     rec.onerror = () => {
-      setStatus('Could not access microphone. Tap a quick voice suggestion below:');
+      setStatus('Could not access microphone. Tap a quick topic below:');
     };
     try {
       rec.start();
     } catch {
-      setStatus('Tap a quick voice suggestion below:');
+      setStatus('Tap a quick topic below:');
     }
     return () => {
       try {
@@ -840,7 +923,7 @@ export const VoiceSearchModal: React.FC<{
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mb-4">{transcript || status}</p>
 
         <div className="flex flex-wrap justify-center gap-2 pt-2">
-          {['Physics JEE', 'Masala Dosa', 'Indie Music', 'Ladakh Ride', 'Cricket Tactics'].map((phrase) => (
+          {['Physics JEE', 'Indie Music', 'Cricket Highlights', 'Indian Tech', 'Street Food'].map((phrase) => (
             <button
               key={phrase}
               type="button"
@@ -876,7 +959,7 @@ export const ShortcutsModal: React.FC<{ open: boolean; onClose: () => void }> = 
       <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base">Keyboard shortcuts</h3>
-          <button type="button" onClick={onClose} className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Close shortcuts dialog" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>

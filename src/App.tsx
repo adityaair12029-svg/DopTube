@@ -1,11 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import type { AppPage, ChannelSummary, NotificationItem, UserProfile, VideoItem } from './types';
+import type {
+  AppPage,
+  ChannelSummary,
+  HomepageSection,
+  MusicTrack,
+  NotificationItem,
+  PlaylistItem,
+  UserProfile,
+  VideoItem,
+} from './types';
 import { apiFetch } from './lib/api';
+import { signOutFirebase } from './firebase';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { MiniPlayer } from './components/MiniPlayer';
+import { MusicMiniPlayer } from './components/MusicMiniPlayer';
 import {
   AuthModal,
+  OnboardingModal,
   PlaylistModal,
   ReportModal,
   ShareModal,
@@ -17,12 +29,15 @@ import { HomeView } from './pages/HomeView';
 import { SearchView } from './pages/SearchView';
 import { WatchView } from './pages/WatchView';
 import { ShortsView } from './pages/ShortsView';
+import { MusicView } from './pages/MusicView';
 import {
   ChannelView,
   HistoryView,
   PlaylistsView,
+  QueueView,
   SimpleVideoCollectionView,
   SubscriptionsView,
+  YouView,
 } from './pages/LibraryViews';
 import { StudioView } from './pages/StudioView';
 import { AdminView } from './pages/AdminView';
@@ -47,13 +62,26 @@ export default function App() {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Home feed state
+  // Personalized Home feed + infinite scroll state
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [sections, setSections] = useState<HomepageSection[]>([]);
   const [shorts, setShorts] = useState<VideoItem[]>([]);
-  const [continueWatching, setContinueWatching] = useState<VideoItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [feedLoading, setFeedLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Playback, Autoplay & Queue state
+  const [queue, setQueue] = useState<VideoItem[]>([]);
+  const [autoplayEnabled, setAutoplayEnabled] = useState(true);
+  const [autoplayMode, setAutoplayMode] = useState<'recommended' | 'playlist' | 'queue' | 'repeat'>('recommended');
+  const [activePlaylistId, setActivePlaylistId] = useState('');
+
+  // Music Hub & Mini Audio Player state
+  const [activeMusicTrack, setActiveMusicTrack] = useState<MusicTrack | null>(null);
+  const [musicQueue, setMusicQueue] = useState<MusicTrack[]>([]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,6 +98,7 @@ export default function App() {
 
   // Modals & Overlays
   const [authOpen, setAuthOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -97,27 +126,42 @@ export default function App() {
     localStorage.setItem('doptube_theme', theme);
   }, [theme]);
 
+  const loadQueue = useCallback(async () => {
+    try {
+      const qRes = await apiFetch<{ videos: VideoItem[] }>('/api/queue');
+      setQueue(qRes.videos);
+    } catch {
+      setQueue([]);
+    }
+  }, []);
+
   const loadUserContext = useCallback(async () => {
     try {
       const me = await apiFetch<{ user: UserProfile | null }>('/api/auth/me');
       setUser(me.user);
+      if (me.user?.preferences) {
+        setAutoplayEnabled(me.user.preferences.autoplayEnabled);
+        const params = new URLSearchParams(window.location.search);
+        if (!me.user.preferences.onboardingCompleted && !params.has('autostart')) {
+          setOnboardingOpen(true);
+        }
+      }
       const subRes = await apiFetch<{ channels: ChannelSummary[] }>('/api/subscriptions');
       setSubscribedChannels(subRes.channels);
       if (me.user) {
-        const [notifRes, histRes] = await Promise.all([
+        const [notifRes] = await Promise.all([
           apiFetch<{ notifications: NotificationItem[] }>('/api/notifications'),
-          apiFetch<{ videos: VideoItem[] }>('/api/history'),
+          loadQueue(),
         ]);
         setNotifications(notifRes.notifications);
-        setContinueWatching(histRes.videos.filter((v) => (v.progressSec ?? 0) > 10));
       } else {
         setNotifications([]);
-        setContinueWatching([]);
+        setQueue([]);
       }
     } catch {
       // ignore initial auth error
     }
-  }, []);
+  }, [loadQueue]);
 
   useEffect(() => {
     void loadUserContext();
@@ -127,15 +171,28 @@ export default function App() {
     setFeedLoading(true);
     try {
       const [mainRes, shortsRes] = await Promise.all([
-        apiFetch<{ videos: VideoItem[] }>(
-          `/api/videos?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(selectedLanguage)}`
+        apiFetch<{
+          videos: VideoItem[];
+          sections: HomepageSection[];
+          nextCursor: number | null;
+          hasMore: boolean;
+        }>(
+          `/api/recommendations/home?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(
+            selectedLanguage
+          )}&cursor=0&limit=12`
         ),
-        apiFetch<{ videos: VideoItem[] }>('/api/videos?shorts=1'),
+        apiFetch<{ videos: VideoItem[] }>('/api/recommendations/shorts'),
       ]);
       setVideos(mainRes.videos);
+      setSections(mainRes.sections || []);
+      setNextCursor(mainRes.nextCursor ?? null);
+      setHasMore(Boolean(mainRes.hasMore));
       setShorts(shortsRes.videos);
     } catch {
       setVideos([]);
+      setSections([]);
+      setNextCursor(null);
+      setHasMore(false);
     } finally {
       setFeedLoading(false);
     }
@@ -144,6 +201,33 @@ export default function App() {
   useEffect(() => {
     void loadFeed();
   }, [loadFeed]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || nextCursor === null) return;
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch<{
+        videos: VideoItem[];
+        nextCursor: number | null;
+        hasMore: boolean;
+      }>(
+        `/api/recommendations/home?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(
+          selectedLanguage
+        )}&cursor=${nextCursor}&limit=12`
+      );
+      setVideos((prev) => {
+        const existing = new Set(prev.map((v) => v.id));
+        const appended = res.videos.filter((v) => !existing.has(v.id));
+        return [...prev, ...appended];
+      });
+      setNextCursor(res.nextCursor ?? null);
+      setHasMore(Boolean(res.hasMore));
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, nextCursor, selectedCategory, selectedLanguage]);
 
   const executeSearch = useCallback(
     async (q: string, sort = searchSort, duration = searchDuration, lang = searchLanguage) => {
@@ -175,6 +259,7 @@ export default function App() {
     setPageParam(param);
     if (nextPage === 'watch') {
       setMiniPlayerVideo(null);
+      setActiveMusicTrack(null);
       setSidebarExpanded(false);
       window.history.replaceState({}, '', `/?watch=${encodeURIComponent(param)}`);
     } else {
@@ -184,6 +269,24 @@ export default function App() {
       window.history.replaceState({}, '', '/');
     }
     window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
+
+  const handleWatch = useCallback(
+    (videoId: string) => {
+      apiFetch('/api/recommendations/click', {
+        method: 'POST',
+        body: JSON.stringify({ videoId }),
+      }).catch(() => {});
+      navigateTo('watch', videoId);
+    },
+    [navigateTo]
+  );
+
+  const handleImpressions = useCallback((videoIds: string[]) => {
+    apiFetch('/api/recommendations/impression', {
+      method: 'POST',
+      body: JSON.stringify({ videoIds, surface: 'home' }),
+    }).catch(() => {});
   }, []);
 
   const handleToggleSidebar = () => {
@@ -215,6 +318,130 @@ export default function App() {
     setPlaylistVideoId(videoId);
   };
 
+  const handlePlayNext = async (videoId: string) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    try {
+      await apiFetch('/api/queue', {
+        method: 'POST',
+        body: JSON.stringify({ videoId, playNext: true }),
+      });
+      await loadQueue();
+      showToast('Added to Play Next in queue');
+    } catch {
+      showToast('Could not add to queue');
+    }
+  };
+
+  const handleAddToQueue = async (videoId: string) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    try {
+      await apiFetch('/api/queue', {
+        method: 'POST',
+        body: JSON.stringify({ videoId, playNext: false }),
+      });
+      await loadQueue();
+      showToast('Added to playback queue');
+    } catch {
+      showToast('Could not add to queue');
+    }
+  };
+
+  const handleNotInterested = async (videoId: string) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    setVideos((prev) => prev.filter((v) => v.id !== videoId));
+    setSections((prev) => prev.map((sec) => ({ ...sec, videos: sec.videos.filter((v) => v.id !== videoId) })));
+    try {
+      await apiFetch('/api/events/feedback', {
+        method: 'POST',
+        body: JSON.stringify({ feedbackType: 'not_interested', videoId }),
+      });
+      showToast('Video removed from your recommendations');
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDontRecommendCreator = async (channelId: string, channelName: string) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    setVideos((prev) => prev.filter((v) => v.channelId !== channelId));
+    setSections((prev) =>
+      prev.map((sec) => ({ ...sec, videos: sec.videos.filter((v) => v.channelId !== channelId) }))
+    );
+    try {
+      await apiFetch('/api/events/feedback', {
+        method: 'POST',
+        body: JSON.stringify({ feedbackType: 'dont_recommend_creator', channelId }),
+      });
+      showToast(`We won’t recommend ${channelName}`);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handlePlayPlaylist = (playlist: PlaylistItem) => {
+    if (!playlist.videos || playlist.videos.length === 0) return;
+    setActivePlaylistId(playlist.id);
+    setAutoplayMode('playlist');
+    setAutoplayEnabled(true);
+    handleWatch(playlist.videos[0].id);
+  };
+
+  const handleToggleAutoplay = async () => {
+    const next = !autoplayEnabled;
+    setAutoplayEnabled(next);
+    if (user) {
+      await apiFetch('/api/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({ autoplayEnabled: next }),
+      }).catch(() => {});
+    }
+    showToast(next ? 'Autoplay enabled' : 'Autoplay paused');
+  };
+
+  const handlePlayMusicTrack = (track: MusicTrack, list: MusicTrack[]) => {
+    setMiniPlayerVideo(null);
+    setActiveMusicTrack(track);
+    setMusicQueue(list);
+    if (user) {
+      apiFetch('/api/music/history', {
+        method: 'POST',
+        body: JSON.stringify({ trackId: track.id }),
+      }).catch(() => {});
+    }
+  };
+
+  const handleToggleLikeTrack = async (trackId: string) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+    try {
+      const target = activeMusicTrack?.id === trackId ? activeMusicTrack : musicQueue.find((t) => t.id === trackId);
+      const nextLiked = !target?.isLiked;
+      await apiFetch(`/api/music/like/${trackId}`, {
+        method: 'POST',
+        body: JSON.stringify({ liked: nextLiked }),
+      });
+      setActiveMusicTrack((prev) => (prev && prev.id === trackId ? { ...prev, isLiked: nextLiked } : prev));
+      setMusicQueue((prev) => prev.map((t) => (t.id === trackId ? { ...t, isLiked: nextLiked } : t)));
+      showToast(nextLiked ? 'Saved to Liked Songs' : 'Removed from Liked Songs');
+    } catch {
+      showToast('Could not update song like');
+    }
+  };
+
   const handleOpenUpload = () => {
     if (!user) {
       setAuthOpen(true);
@@ -225,10 +452,12 @@ export default function App() {
 
   const handleLogout = async () => {
     await apiFetch('/api/auth/logout', { method: 'POST' });
+    await signOutFirebase().catch(() => {});
     setUser(null);
     setNotifications([]);
-    setContinueWatching([]);
+    setQueue([]);
     void loadUserContext();
+    void loadFeed();
     showToast('Signed out of DopTube');
   };
 
@@ -238,29 +467,33 @@ export default function App() {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
+    if (patch.preferredLanguage) {
+      await apiFetch('/api/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({ preferredLanguages: [patch.preferredLanguage] }),
+      }).catch(() => {});
+    }
     setUser(res.user);
     void loadFeed();
     showToast('Preferences updated');
   };
 
   const commonCardActions = {
-    onWatch: (id: string) => navigateTo('watch', id),
+    onWatch: handleWatch,
     onOpenChannel: (id: string) => navigateTo('channel', id),
     onSaveWatchLater: handleSaveWatchLater,
     onSavePlaylist: handleSavePlaylist,
     onShare: (v: VideoItem) => setShareVideo(v),
     onReport: (v: VideoItem) => setReportVideo(v),
     onMiniPlayer: (v: VideoItem) => setMiniPlayerVideo(v),
+    onPlayNext: handlePlayNext,
+    onAddToQueue: handleAddToQueue,
+    onNotInterested: handleNotInterested,
+    onDontRecommendCreator: handleDontRecommendCreator,
   };
 
-  const mainMarginClass =
-    page === 'watch'
-      ? sidebarExpanded
-        ? 'md:ml-60'
-        : 'md:ml-[72px]'
-      : sidebarExpanded
-      ? 'md:ml-60'
-      : 'md:ml-[72px]';
+  const mainMarginClass = sidebarExpanded ? 'md:ml-60' : 'md:ml-[72px]';
+  const infiniteScrollEnabled = user?.preferences?.infiniteScrollEnabled ?? true;
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0f0f0f] text-[#0f0f0f] dark:text-[#f1f1f1]">
@@ -307,13 +540,18 @@ export default function App() {
           <HomeView
             videos={videos}
             shorts={shorts}
-            continueWatching={continueWatching}
+            sections={sections}
             loading={feedLoading}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
+            infiniteScrollEnabled={infiniteScrollEnabled}
             selectedCategory={selectedCategory}
             selectedLanguage={selectedLanguage}
             onSelectCategory={setSelectedCategory}
             onSelectLanguage={setSelectedLanguage}
+            onLoadMore={handleLoadMore}
             onOpenShort={(shortId) => navigateTo('shorts', shortId)}
+            onImpressions={handleImpressions}
             {...commonCardActions}
           />
         )}
@@ -338,7 +576,14 @@ export default function App() {
           <WatchView
             videoId={pageParam}
             user={user}
-            onWatch={(id) => navigateTo('watch', id)}
+            autoplayEnabled={autoplayEnabled}
+            autoplayMode={autoplayMode}
+            activePlaylistId={activePlaylistId}
+            queue={queue}
+            onToggleAutoplay={handleToggleAutoplay}
+            onChangeAutoplayMode={(mode) => setAutoplayMode(mode)}
+            onQueueChanged={loadQueue}
+            onWatch={handleWatch}
             onOpenChannel={(id) => navigateTo('channel', id)}
             onOpenAuth={() => setAuthOpen(true)}
             onSavePlaylist={handleSavePlaylist}
@@ -360,8 +605,41 @@ export default function App() {
             user={user}
             onOpenAuth={() => setAuthOpen(true)}
             onOpenChannel={(id) => navigateTo('channel', id)}
+            onSavePlaylist={handleSavePlaylist}
             onShare={(v) => setShareVideo(v)}
             onToast={showToast}
+          />
+        )}
+
+        {page === 'music' && (
+          <MusicView
+            user={user}
+            activeTrackId={activeMusicTrack?.id}
+            onPlayTrack={handlePlayMusicTrack}
+            onToggleLikeTrack={handleToggleLikeTrack}
+            onOpenAuth={() => setAuthOpen(true)}
+            onToast={showToast}
+          />
+        )}
+
+        {page === 'you' && (
+          <YouView
+            user={user}
+            onOpenAuth={() => setAuthOpen(true)}
+            onNavigate={navigateTo}
+            onPlayPlaylist={handlePlayPlaylist}
+            {...commonCardActions}
+          />
+        )}
+
+        {page === 'queue' && (
+          <QueueView
+            user={user}
+            queue={queue}
+            onOpenAuth={() => setAuthOpen(true)}
+            onQueueChanged={loadQueue}
+            onToast={showToast}
+            {...commonCardActions}
           />
         )}
 
@@ -380,7 +658,13 @@ export default function App() {
         )}
 
         {page === 'playlists' && (
-          <PlaylistsView user={user} onOpenAuth={() => setAuthOpen(true)} onToast={showToast} {...commonCardActions} />
+          <PlaylistsView
+            user={user}
+            onOpenAuth={() => setAuthOpen(true)}
+            onPlayPlaylist={handlePlayPlaylist}
+            onToast={showToast}
+            {...commonCardActions}
+          />
         )}
 
         {page === 'watch-later' && (
@@ -434,7 +718,7 @@ export default function App() {
           <SimpleVideoCollectionView
             title="Trending India"
             subtitle="Most watched videos across India right now"
-            endpoint="/api/videos?trending=1&shorts=0"
+            endpoint="/api/recommendations/trending?shorts=0"
             user={user}
             onOpenAuth={() => setAuthOpen(true)}
             {...commonCardActions}
@@ -457,7 +741,7 @@ export default function App() {
             user={user}
             onOpenAuth={() => setAuthOpen(true)}
             onOpenUpload={handleOpenUpload}
-            onWatch={(id) => navigateTo('watch', id)}
+            onWatch={handleWatch}
             onUserUpdated={setUser}
             onToast={showToast}
           />
@@ -471,6 +755,10 @@ export default function App() {
             theme={theme}
             onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
             onUserUpdated={setUser}
+            onPreferencesUpdated={() => {
+              void loadUserContext();
+              void loadFeed();
+            }}
             onOpenAuth={() => setAuthOpen(true)}
             onToast={showToast}
           />
@@ -479,18 +767,28 @@ export default function App() {
         {page === 'help' && <HelpAndSupportView onToast={showToast} />}
       </main>
 
-      {/* Floating Miniplayer */}
-      {miniPlayerVideo && page !== 'watch' && (
+      {/* Floating Video Miniplayer */}
+      {miniPlayerVideo && page !== 'watch' && !activeMusicTrack && (
         <MiniPlayer
           video={miniPlayerVideo}
-          onExpand={(id) => navigateTo('watch', id)}
+          onExpand={(id) => handleWatch(id)}
           onClose={() => setMiniPlayerVideo(null)}
         />
       )}
 
+      {/* Persistent Music Mini Audio Player */}
+      <MusicMiniPlayer
+        track={activeMusicTrack}
+        queue={musicQueue}
+        onSelectTrack={(track) => handlePlayMusicTrack(track, musicQueue)}
+        onToggleLike={handleToggleLikeTrack}
+        onClose={() => setActiveMusicTrack(null)}
+      />
+
       {/* Modals */}
       <AuthModal
         open={authOpen}
+        theme={theme}
         onClose={() => setAuthOpen(false)}
         onSuccess={(loggedInUser) => {
           setUser(loggedInUser);
@@ -500,13 +798,25 @@ export default function App() {
         }}
       />
 
+      <OnboardingModal
+        open={onboardingOpen}
+        initialLanguage={user?.preferredLanguage || 'English'}
+        onClose={() => setOnboardingOpen(false)}
+        onSaved={(updated) => {
+          setUser(updated);
+          void loadFeed();
+          showToast('Personalized feed ready!');
+        }}
+      />
+
       <UploadModal
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
+        onOpenMusicUpload={() => navigateTo('music')}
         onUploaded={(videoId) => {
           void loadFeed();
           showToast('Video published on DopTube!');
-          navigateTo('watch', videoId);
+          handleWatch(videoId);
         }}
       />
 

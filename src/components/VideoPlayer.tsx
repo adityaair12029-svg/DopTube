@@ -16,12 +16,23 @@ import {
 import type { VideoItem } from '../types';
 import { formatDuration } from '../lib/format';
 
+export type PlayerBehaviorEvent =
+  | 'start'
+  | 'progress_10'
+  | 'progress_25'
+  | 'progress_50'
+  | 'progress_75'
+  | 'completion'
+  | 'replay';
+
 interface VideoPlayerProps {
   video: VideoItem;
   theaterMode?: boolean;
   onToggleTheater?: () => void;
   onMinimize?: () => void;
   onProgressSave?: (progressSec: number) => void;
+  onBehaviorEvent?: (eventType: PlayerBehaviorEvent, progressPct: number, watchDurationSec: number) => void;
+  onEndedNext?: () => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -30,10 +41,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onToggleTheater,
   onMinimize,
   onProgressSave,
+  onBehaviorEvent,
+  onEndedNext,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const firedMilestonesRef = useRef<Set<string>>(new Set());
+  const endedOnceRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -49,6 +64,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [controlsVisible, setControlsVisible] = useState(true);
 
   const isExternalEmbed = video.sourceType === 'external' && Boolean(video.externalEmbedUrl);
+
+  useEffect(() => {
+    firedMilestonesRef.current = new Set();
+    endedOnceRef.current = false;
+    onBehaviorEvent?.('start', 0, 0);
+  }, [video.id]);
 
   useEffect(() => {
     if (isExternalEmbed) return;
@@ -102,7 +123,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  // Keyboard shortcuts when player is mounted (ignored if typing in input/textarea)
   useEffect(() => {
     if (isExternalEmbed) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -133,7 +153,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  // Periodic watch progress save
   useEffect(() => {
     if (isExternalEmbed || !onProgressSave) return;
     const interval = setInterval(() => {
@@ -147,7 +166,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   if (isExternalEmbed && video.externalEmbedUrl) {
     return (
-      <div className="w-full aspect-video rounded-xl overflow-hidden bg-black relative">
+      <div className="w-full aspect-video rounded-none sm:rounded-xl overflow-hidden bg-black relative">
         <iframe
           key={video.id}
           src={video.externalEmbedUrl}
@@ -164,6 +183,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const el = videoRef.current;
     if (!el) return;
     if (el.paused) {
+      if (endedOnceRef.current && el.currentTime >= (el.duration || 1) - 1) {
+        el.currentTime = 0;
+        onBehaviorEvent?.('replay', 0, Math.floor(el.duration || 0));
+      }
       el.play().then(() => setPlaying(true)).catch(() => {});
     } else {
       el.pause();
@@ -251,7 +274,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       ref={containerRef}
       onMouseMove={() => setControlsVisible(true)}
       onMouseLeave={() => playing && setControlsVisible(false)}
-      className={`relative w-full bg-black rounded-xl overflow-hidden select-none group ${
+      className={`relative w-full bg-black rounded-none sm:rounded-xl overflow-hidden select-none group ${
         theaterMode ? 'max-h-[75vh] aspect-video' : 'aspect-video'
       }`}
     >
@@ -267,10 +290,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           if (el.buffered.length > 0 && el.duration > 0) {
             setBufferedPct((el.buffered.end(el.buffered.length - 1) / el.duration) * 100);
           }
+          if (el.duration > 0 && onBehaviorEvent) {
+            const pct = (el.currentTime / el.duration) * 100;
+            const milestones: Array<[number, PlayerBehaviorEvent]> = [
+              [10, 'progress_10'],
+              [25, 'progress_25'],
+              [50, 'progress_50'],
+              [75, 'progress_75'],
+            ];
+            for (const [threshold, eventName] of milestones) {
+              if (pct >= threshold && !firedMilestonesRef.current.has(eventName)) {
+                firedMilestonesRef.current.add(eventName);
+                onBehaviorEvent(eventName, Math.round(pct), Math.floor(el.currentTime));
+              }
+            }
+          }
         }}
         onEnded={() => {
           setPlaying(false);
+          endedOnceRef.current = true;
           if (onProgressSave) onProgressSave(Math.floor(duration));
+          onBehaviorEvent?.('completion', 100, Math.floor(duration));
+          onEndedNext?.();
         }}
         className="w-full h-full object-contain cursor-pointer"
       />

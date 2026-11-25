@@ -1,6 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Download, Pause, Play, Plus, Trash2 } from 'lucide-react';
-import type { ChannelSummary, PlaylistItem, UserProfile, VideoItem } from '../types';
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Download,
+  Edit3,
+  Heart,
+  History,
+  ListMusic,
+  ListVideo,
+  Music2,
+  Pause,
+  Play,
+  Plus,
+  Settings,
+  Shuffle,
+  Sparkles,
+  Trash2,
+  UserCheck,
+  X,
+} from 'lucide-react';
+import type { AppPage, ChannelSummary, PlaylistItem, UserProfile, VideoItem } from '../types';
 import { apiFetch } from '../lib/api';
 import { formatViews } from '../lib/format';
 import { VideoCard } from '../components/VideoCard';
@@ -12,7 +35,385 @@ interface CommonCardProps {
   onSavePlaylist: (videoId: string) => void;
   onShare: (video: VideoItem) => void;
   onReport: (video: VideoItem) => void;
+  onMiniPlayer?: (video: VideoItem) => void;
+  onPlayNext?: (videoId: string) => void;
+  onAddToQueue?: (videoId: string) => void;
+  onNotInterested?: (videoId: string) => void;
+  onDontRecommendCreator?: (channelId: string, channelName: string) => void;
 }
+
+export const YouView: React.FC<
+  CommonCardProps & {
+    user: UserProfile | null;
+    onOpenAuth: () => void;
+    onNavigate: (page: AppPage, param?: string) => void;
+    onPlayPlaylist?: (playlist: PlaylistItem) => void;
+  }
+> = ({ user, onOpenAuth, onNavigate, onWatch, onPlayPlaylist }) => {
+  const [historyVideos, setHistoryVideos] = useState<VideoItem[]>([]);
+  const [playlists, setPlaylists] = useState<PlaylistItem[]>([]);
+  const [watchLaterCount, setWatchLaterCount] = useState(0);
+  const [likedCount, setLikedCount] = useState(0);
+  const [likedPreview, setLikedPreview] = useState<string>('');
+  const [libraryFilter, setLibraryFilter] = useState<
+    'recents' | 'downloaded' | 'playlists' | 'watch-later' | 'liked' | 'music'
+  >('recents');
+
+  useEffect(() => {
+    if (!user) {
+      setHistoryVideos([]);
+      setPlaylists([]);
+      setWatchLaterCount(0);
+      setLikedCount(0);
+      setLikedPreview('');
+      return;
+    }
+    Promise.all([
+      apiFetch<{ videos: VideoItem[] }>('/api/history').catch(() => ({ videos: [] })),
+      apiFetch<{ playlists: PlaylistItem[] }>('/api/playlists').catch(() => ({ playlists: [] })),
+      apiFetch<{ videos: VideoItem[] }>('/api/watch-later').catch(() => ({ videos: [] })),
+      apiFetch<{ videos: VideoItem[] }>('/api/liked-videos').catch(() => ({ videos: [] })),
+    ]).then(([hRes, pRes, wlRes, lkRes]) => {
+      setHistoryVideos(hRes.videos.slice(0, 10));
+      setPlaylists(pRes.playlists);
+      setWatchLaterCount(wlRes.videos.length);
+      setLikedCount(lkRes.videos.length);
+      setLikedPreview(lkRes.videos[0]?.thumbnailUrl || '');
+    });
+  }, [user?.id]);
+
+  if (!user) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16 text-center space-y-4">
+        <div className="w-16 h-16 rounded-full bg-neutral-100 dark:bg-[#1f1f1f] mx-auto flex items-center justify-center">
+          <UserCheck className="w-8 h-8 text-[#ff0033]" />
+        </div>
+        <h1 className="text-2xl font-bold">Your DopTube Hub</h1>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
+          Sign in with Google to view your history, saved playlists, liked videos, Watch later, and AI personalization controls.
+        </p>
+        <div className="flex flex-wrap justify-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onOpenAuth}
+            className="h-10 px-6 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          >
+            Sign in with Google
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('settings')}
+            className="h-10 px-5 rounded-full bg-neutral-100 dark:bg-[#272727] text-sm font-medium cursor-pointer"
+          >
+            Settings
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 pb-24 space-y-6">
+      {/* Top Account Switch & Quick Settings Row */}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onOpenAuth}
+          className="h-8 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+        >
+          <span>Accounts</span>
+          <ChevronRight className="w-3.5 h-3.5 rotate-90" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('settings')}
+          aria-label="Open Settings"
+          className="h-8 px-3 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+        >
+          <Settings className="w-3.5 h-3.5" />
+          <span>Settings</span>
+        </button>
+      </div>
+
+      {/* Profile Identity Header */}
+      <div className="flex items-center gap-4">
+        <img
+          src={user.avatarUrl}
+          alt={user.name}
+          referrerPolicy="no-referrer"
+          className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border border-neutral-200 dark:border-[#333]"
+        />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl sm:text-2xl font-bold truncate">{user.name}</h1>
+          <p className="text-xs sm:text-sm text-[#606060] dark:text-[#aaaaaa] truncate">
+            {user.channel?.handle || user.email} · {user.preferredLanguage}
+          </p>
+        </div>
+      </div>
+
+      {/* Primary Action Pills */}
+      <div className="flex items-center gap-2.5 overflow-x-auto no-scrollbar">
+        <button
+          type="button"
+          onClick={() => (user.channel ? onNavigate('channel', user.channel.id) : onNavigate('studio'))}
+          className="h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-xs sm:text-sm font-semibold shrink-0 cursor-pointer"
+        >
+          View channel
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('studio')}
+          className="h-9 px-5 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs sm:text-sm font-medium shrink-0 cursor-pointer"
+        >
+          DopTube Studio
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigate('queue')}
+          className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs sm:text-sm font-medium shrink-0 flex items-center gap-1.5 cursor-pointer"
+        >
+          <ListMusic className="w-4 h-4" />
+          <span>Queue</span>
+        </button>
+      </div>
+
+      {/* History Horizontal Carousel */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => onNavigate('history')}
+            className="flex items-center gap-1 text-lg font-bold hover:text-[#ff0033] cursor-pointer"
+          >
+            <span>History</span>
+            <ChevronRight className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('history')}
+            className="h-7 px-3 rounded-full border border-neutral-300 dark:border-[#383838] text-xs font-medium cursor-pointer"
+          >
+            View all
+          </button>
+        </div>
+
+        {historyVideos.length === 0 ? (
+          <p className="text-xs text-[#606060] dark:text-[#aaaaaa] py-3">
+            Videos you watch on DopTube will appear here.
+          </p>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+            {historyVideos.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => onWatch(v.id)}
+                className="w-40 shrink-0 text-left group cursor-pointer"
+              >
+                <div className="relative aspect-video rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#1f1f1f]">
+                  <img
+                    src={v.thumbnailUrl}
+                    alt={v.title}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                  />
+                  {v.progressSec && v.durationSec > 0 ? (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/30">
+                      <div
+                        className="h-full bg-[#ff0033]"
+                        style={{ width: `${Math.min(100, Math.round((v.progressSec / v.durationSec) * 100))}%` }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                <p className="mt-1.5 text-xs font-semibold line-clamp-2 leading-snug">{v.title}</p>
+                <p className="text-[11px] text-[#606060] dark:text-[#aaaaaa] truncate">{v.channelName}</p>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Library Filter Chips */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold">Library</h2>
+          <button
+            type="button"
+            onClick={() => onNavigate('playlists')}
+            className="h-7 px-3 rounded-full border border-neutral-300 dark:border-[#383838] text-xs font-medium cursor-pointer"
+          >
+            Manage playlists
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+          {(
+            [
+              ['recents', 'Recents'],
+              ['downloaded', 'Downloaded'],
+              ['playlists', 'Playlists'],
+              ['watch-later', 'Watch later'],
+              ['liked', 'Liked videos'],
+              ['music', 'Music'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                setLibraryFilter(id);
+                if (id === 'downloaded') onNavigate('downloads');
+                if (id === 'music') onNavigate('music');
+              }}
+              className={`h-8 px-3.5 rounded-lg text-xs font-medium shrink-0 cursor-pointer ${
+                libraryFilter === id
+                  ? 'bg-[#0f0f0f] text-white dark:bg-white dark:text-[#0f0f0f]'
+                  : 'bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Stacked Library Rows */}
+        <div className="space-y-3">
+          {(libraryFilter === 'recents' || libraryFilter === 'liked') && (
+            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-neutral-100 dark:hover:bg-[#1a1a1a] transition-colors">
+              <button
+                type="button"
+                onClick={() => onNavigate('liked')}
+                className="relative w-32 aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-emerald-600/80 to-teal-900 shrink-0 cursor-pointer"
+              >
+                {likedPreview ? (
+                  <img
+                    src={likedPreview}
+                    alt="Liked videos"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-white">
+                    <Heart className="w-6 h-6" />
+                  </div>
+                )}
+                <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-mono-nums">
+                  {likedCount}
+                </span>
+              </button>
+              <button type="button" onClick={() => onNavigate('liked')} className="flex-1 text-left cursor-pointer">
+                <p className="text-sm font-semibold">Liked videos</p>
+                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Private · {likedCount} videos</p>
+              </button>
+            </div>
+          )}
+
+          {(libraryFilter === 'recents' || libraryFilter === 'watch-later') && (
+            <div className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-neutral-100 dark:hover:bg-[#1a1a1a] transition-colors">
+              <button
+                type="button"
+                onClick={() => onNavigate('watch-later')}
+                className="relative w-32 aspect-video rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#272727] shrink-0 flex items-center justify-center cursor-pointer"
+              >
+                <Clock className="w-6 h-6" />
+                <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-mono-nums">
+                  {watchLaterCount}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('watch-later')}
+                className="flex-1 text-left cursor-pointer"
+              >
+                <p className="text-sm font-semibold">Watch later</p>
+                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Private · {watchLaterCount} videos</p>
+              </button>
+            </div>
+          )}
+
+          {(libraryFilter === 'recents' || libraryFilter === 'playlists') &&
+            playlists.map((pl) => (
+              <div
+                key={pl.id}
+                className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-neutral-100 dark:hover:bg-[#1a1a1a] transition-colors"
+              >
+                <button
+                  type="button"
+                  onClick={() => (pl.videos.length > 0 && onPlayPlaylist ? onPlayPlaylist(pl) : onNavigate('playlists'))}
+                  className="relative w-32 aspect-video rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#272727] shrink-0 cursor-pointer"
+                >
+                  {pl.videos[0]?.thumbnailUrl ? (
+                    <img
+                      src={pl.videos[0].thumbnailUrl}
+                      alt={pl.title}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <ListVideo className="w-6 h-6 text-[#606060] dark:text-[#aaaaaa]" />
+                    </div>
+                  )}
+                  <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 text-white text-[10px] font-mono-nums">
+                    {pl.videos.length}
+                  </span>
+                </button>
+                <div className="flex-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('playlists')}
+                    className="text-left block w-full cursor-pointer"
+                  >
+                    <p className="text-sm font-semibold truncate">{pl.title}</p>
+                    <p className="text-xs text-[#606060] dark:text-[#aaaaaa] capitalize">
+                      {pl.visibility} · Playlist · {pl.videos.length} videos
+                    </p>
+                  </button>
+                </div>
+                {pl.videos.length > 0 && onPlayPlaylist && (
+                  <button
+                    type="button"
+                    onClick={() => onPlayPlaylist(pl)}
+                    className="h-8 px-3 rounded-full bg-neutral-200 dark:bg-[#2a2a2a] text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    Play
+                  </button>
+                )}
+              </div>
+            ))}
+
+          {/* Quick Shortcuts to Music & Offline */}
+          <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => onNavigate('music')}
+              className="p-3.5 rounded-xl bg-neutral-100 dark:bg-[#1a1a1a] hover:bg-neutral-200 dark:hover:bg-[#242424] flex items-center gap-3 text-left cursor-pointer"
+            >
+              <Music2 className="w-5 h-5 text-[#ff0033] shrink-0" />
+              <div>
+                <p className="text-sm font-semibold">DopTube Music</p>
+                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Stream audio tracks, mixes & uploads</p>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate('downloads')}
+              className="p-3.5 rounded-xl bg-neutral-100 dark:bg-[#1a1a1a] hover:bg-neutral-200 dark:hover:bg-[#242424] flex items-center gap-3 text-left cursor-pointer"
+            >
+              <Download className="w-5 h-5 text-[#065fd4] dark:text-[#3ea6ff] shrink-0" />
+              <div>
+                <p className="text-sm font-semibold">Downloads & Native MP4s</p>
+                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Authorized DopTube offline downloads</p>
+              </div>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+};
 
 export const SubscriptionsView: React.FC<
   CommonCardProps & {
@@ -39,7 +440,7 @@ export const SubscriptionsView: React.FC<
       <div className="py-20 text-center max-w-md mx-auto px-4">
         <h2 className="text-xl font-bold">Don’t miss new videos</h2>
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
-          Sign in to see updates from your favourite Indian creators on DopTube.
+          Sign in with Google to see updates from your favourite Indian creators on DopTube.
         </p>
         <button
           type="button"
@@ -53,7 +454,7 @@ export const SubscriptionsView: React.FC<
   }
 
   return (
-    <div className="px-4 sm:px-6 py-4 pb-20">
+    <div className="px-4 sm:px-6 py-4 pb-24">
       <h1 className="text-xl font-bold mb-4">Subscriptions</h1>
       {channels.length > 0 && (
         <div className="flex items-center gap-4 overflow-x-auto no-scrollbar pb-4 mb-6 border-b border-neutral-200 dark:border-[#272727]">
@@ -122,6 +523,7 @@ export const HistoryView: React.FC<
   if (!user) {
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
+        <History className="w-10 h-10 mx-auto text-[#606060] dark:text-[#aaaaaa] mb-3" />
         <h2 className="text-xl font-bold">Keep track of what you watch</h2>
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">Watch history isn’t viewable when signed out.</p>
         <button
@@ -157,7 +559,7 @@ export const HistoryView: React.FC<
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 pb-20">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 pb-24">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold">History</h1>
@@ -261,11 +663,15 @@ export const PlaylistsView: React.FC<
   CommonCardProps & {
     user: UserProfile | null;
     onOpenAuth: () => void;
+    onPlayPlaylist?: (playlist: PlaylistItem) => void;
     onToast: (msg: string) => void;
   }
-> = ({ user, onOpenAuth, onToast, ...cardProps }) => {
+> = ({ user, onOpenAuth, onPlayPlaylist, onToast, ...cardProps }) => {
   const [playlists, setPlaylists] = useState<PlaylistItem[]>([]);
   const [newTitle, setNewTitle] = useState('');
+  const [newVisibility, setNewVisibility] = useState<'private' | 'unlisted' | 'public'>('private');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
 
   const load = () => {
     if (!user) return;
@@ -282,7 +688,9 @@ export const PlaylistsView: React.FC<
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
         <h2 className="text-xl font-bold">Create and organize playlists</h2>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">Sign in to view or build custom DopTube playlists.</p>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
+          Sign in with Google to build custom playlists, reorder videos, and queue playback.
+        </p>
         <button
           type="button"
           onClick={onOpenAuth}
@@ -299,18 +707,65 @@ export const PlaylistsView: React.FC<
     if (newTitle.trim().length < 2) return;
     await apiFetch('/api/playlists', {
       method: 'POST',
-      body: JSON.stringify({ title: newTitle.trim(), visibility: 'private' }),
+      body: JSON.stringify({ title: newTitle.trim(), visibility: newVisibility }),
     });
     setNewTitle('');
     load();
     onToast('Playlist created');
   };
 
+  const renamePlaylist = async (playlistId: string) => {
+    if (editTitle.trim().length < 2) return;
+    await apiFetch(`/api/playlists/${playlistId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: editTitle.trim() }),
+    });
+    setEditingId(null);
+    load();
+    onToast('Playlist renamed');
+  };
+
+  const changeVisibility = async (playlistId: string, visibility: 'public' | 'unlisted' | 'private') => {
+    await apiFetch(`/api/playlists/${playlistId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ visibility }),
+    });
+    load();
+    onToast(`Playlist set to ${visibility}`);
+  };
+
+  const deletePlaylist = async (playlistId: string) => {
+    await apiFetch(`/api/playlists/${playlistId}`, { method: 'DELETE' });
+    setPlaylists((prev) => prev.filter((p) => p.id !== playlistId));
+    onToast('Playlist deleted');
+  };
+
+  const moveVideo = async (pl: PlaylistItem, idx: number, dir: -1 | 1) => {
+    const targetIdx = idx + dir;
+    if (targetIdx < 0 || targetIdx >= pl.videos.length) return;
+    const nextVideos = [...pl.videos];
+    const [moved] = nextVideos.splice(idx, 1);
+    nextVideos.splice(targetIdx, 0, moved);
+    setPlaylists((prev) => prev.map((p) => (p.id === pl.id ? { ...p, videos: nextVideos } : p)));
+    await apiFetch(`/api/playlists/${pl.id}/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ videoIds: nextVideos.map((v) => v.id) }),
+    });
+  };
+
+  const removeVideo = async (playlistId: string, videoId: string) => {
+    await apiFetch(`/api/playlists/${playlistId}/videos/${videoId}`, { method: 'DELETE' });
+    setPlaylists((prev) =>
+      prev.map((p) => (p.id === playlistId ? { ...p, videos: p.videos.filter((v) => v.id !== videoId) } : p))
+    );
+    onToast('Removed video from playlist');
+  };
+
   return (
-    <div className="px-4 sm:px-6 py-4 pb-20 max-w-6xl mx-auto">
+    <div className="px-4 sm:px-6 py-4 pb-24 max-w-6xl mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <h1 className="text-2xl font-bold">Playlists</h1>
-        <form onSubmit={createPlaylist} className="flex gap-2">
+        <form onSubmit={createPlaylist} className="flex flex-wrap gap-2">
           <input
             type="text"
             value={newTitle}
@@ -318,6 +773,15 @@ export const PlaylistsView: React.FC<
             placeholder="New playlist title..."
             className="h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#1f1f1f] border border-neutral-300 dark:border-[#383838] text-sm"
           />
+          <select
+            value={newVisibility}
+            onChange={(e) => setNewVisibility(e.target.value as 'private' | 'unlisted' | 'public')}
+            className="h-9 px-2.5 rounded-lg bg-neutral-100 dark:bg-[#1f1f1f] border border-neutral-300 dark:border-[#383838] text-xs"
+          >
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
           <button
             type="submit"
             className="h-9 px-4 rounded-full bg-[#0f0f0f] dark:bg-[#f1f1f1] text-white dark:text-[#0f0f0f] text-xs font-semibold flex items-center gap-1 cursor-pointer"
@@ -329,24 +793,287 @@ export const PlaylistsView: React.FC<
       </div>
 
       {playlists.length === 0 ? (
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">No playlists yet. Create one above or save any video to a playlist.</p>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
+          No playlists yet. Create one above or save any video to a playlist.
+        </p>
       ) : (
         <div className="space-y-8">
           {playlists.map((pl) => (
             <section key={pl.id} className="pb-6 border-b border-neutral-200 dark:border-[#272727]">
-              <h2 className="text-lg font-semibold mb-3">
-                {pl.title} <span className="text-xs font-normal text-[#606060] dark:text-[#aaaaaa] font-mono-nums">({pl.videos.length} videos)</span>
-              </h2>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                {editingId === pl.id ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="h-8 px-3 rounded-lg bg-neutral-100 dark:bg-[#1f1f1f] border border-neutral-300 dark:border-[#383838] text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => renamePlaylist(pl.id)}
+                      className="h-8 px-3 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      className="p-1.5 rounded-full hover:bg-neutral-200 dark:hover:bg-[#272727] cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold">{pl.title}</h2>
+                    <span className="text-xs text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+                      ({pl.videos.length} videos)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(pl.id);
+                        setEditTitle(pl.title);
+                      }}
+                      aria-label={`Rename ${pl.title}`}
+                      className="p-1.5 rounded-full hover:bg-neutral-200 dark:hover:bg-[#272727] cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {pl.videos.length > 0 && onPlayPlaylist && (
+                    <button
+                      type="button"
+                      onClick={() => onPlayPlaylist(pl)}
+                      className="h-8 px-3.5 rounded-full bg-[#ff0033] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      Play all
+                    </button>
+                  )}
+                  <select
+                    value={pl.visibility}
+                    onChange={(e) => changeVisibility(pl.id, e.target.value as 'public' | 'unlisted' | 'private')}
+                    className="h-8 px-2.5 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium"
+                  >
+                    <option value="private">Private</option>
+                    <option value="unlisted">Unlisted</option>
+                    <option value="public">Public</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => deletePlaylist(pl.id)}
+                    className="h-8 px-3 rounded-full bg-neutral-100 dark:bg-[#272727] hover:text-red-500 text-xs font-medium flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </button>
+                </div>
+              </div>
+
               {pl.videos.length === 0 ? (
                 <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">No videos added yet.</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {pl.videos.map((v) => (
-                    <VideoCard key={v.id} video={v} {...cardProps} />
+                  {pl.videos.map((v, idx) => (
+                    <div key={v.id} className="space-y-2">
+                      <VideoCard video={v} {...cardProps} />
+                      <div className="flex items-center justify-between px-1 text-xs">
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => moveVideo(pl, idx, -1)}
+                            aria-label="Move up"
+                            className="p-1.5 rounded-full bg-neutral-100 dark:bg-[#272727] disabled:opacity-30 cursor-pointer"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === pl.videos.length - 1}
+                            onClick={() => moveVideo(pl, idx, 1)}
+                            aria-label="Move down"
+                            className="p-1.5 rounded-full bg-neutral-100 dark:bg-[#272727] disabled:opacity-30 cursor-pointer"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeVideo(pl.id, v.id)}
+                          className="text-xs text-[#606060] dark:text-[#aaaaaa] hover:text-red-500 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Remove
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
             </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const QueueView: React.FC<
+  CommonCardProps & {
+    user: UserProfile | null;
+    queue: VideoItem[];
+    onOpenAuth: () => void;
+    onQueueChanged: () => void;
+    onToast: (msg: string) => void;
+  }
+> = ({ user, queue, onOpenAuth, onQueueChanged, onToast, ...cardProps }) => {
+  if (!user) {
+    return (
+      <div className="py-20 text-center max-w-md mx-auto px-4">
+        <ListMusic className="w-10 h-10 mx-auto text-[#ff0033] mb-3" />
+        <h2 className="text-xl font-bold">Playback Queue</h2>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
+          Sign in with Google to save videos to your Up Next playback queue across sessions.
+        </p>
+        <button
+          type="button"
+          onClick={onOpenAuth}
+          className="mt-5 h-9 px-5 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+        >
+          Sign in
+        </button>
+      </div>
+    );
+  }
+
+  const moveItem = async (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= queue.length) return;
+    const ids = queue.map((v) => v.id);
+    const [item] = ids.splice(idx, 1);
+    ids.splice(target, 0, item);
+    await apiFetch('/api/queue/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ videoIds: ids }),
+    });
+    onQueueChanged();
+  };
+
+  const shuffleQueue = async () => {
+    if (queue.length < 2) return;
+    const ids = [...queue.map((v) => v.id)].sort(() => Math.random() - 0.5);
+    await apiFetch('/api/queue/reorder', {
+      method: 'PUT',
+      body: JSON.stringify({ videoIds: ids }),
+    });
+    onQueueChanged();
+    onToast('Queue shuffled');
+  };
+
+  const clearQueue = async () => {
+    await apiFetch('/api/queue', { method: 'DELETE' });
+    onQueueChanged();
+    onToast('Queue cleared');
+  };
+
+  const removeFromQueue = async (videoId: string) => {
+    await apiFetch(`/api/queue/${videoId}`, { method: 'DELETE' });
+    onQueueChanged();
+    onToast('Removed from queue');
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 pb-24">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Playback Queue</h1>
+          <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
+            {queue.length} queued videos ready for continuous autoplay
+          </p>
+        </div>
+
+        {queue.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => cardProps.onWatch(queue[0].id)}
+              className="h-9 px-4 rounded-full bg-[#ff0033] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Play queue
+            </button>
+            <button
+              type="button"
+              onClick={shuffleQueue}
+              className="h-9 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              Shuffle
+            </button>
+            <button
+              type="button"
+              onClick={clearQueue}
+              className="h-9 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] text-red-500 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
+
+      {queue.length === 0 ? (
+        <div className="py-16 text-center rounded-2xl bg-neutral-100 dark:bg-[#181818]">
+          <Sparkles className="w-8 h-8 mx-auto text-[#ff0033] mb-2" />
+          <p className="text-sm font-medium">Your queue is empty</p>
+          <p className="text-xs text-[#606060] dark:text-[#aaaaaa] mt-1">
+            Use “Play next” or “Add to queue” from any video’s menu to build your Up Next list.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {queue.map((v, idx) => (
+            <div key={v.id} className="flex items-start gap-2">
+              <div className="flex flex-col items-center gap-1 pt-2">
+                <button
+                  type="button"
+                  disabled={idx === 0}
+                  onClick={() => moveItem(idx, -1)}
+                  aria-label="Move up in queue"
+                  className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-[#272727] disabled:opacity-30 cursor-pointer"
+                >
+                  <ArrowUp className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-xs font-mono-nums text-[#606060] dark:text-[#aaaaaa]">{idx + 1}</span>
+                <button
+                  type="button"
+                  disabled={idx === queue.length - 1}
+                  onClick={() => moveItem(idx, 1)}
+                  aria-label="Move down in queue"
+                  className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-[#272727] disabled:opacity-30 cursor-pointer"
+                >
+                  <ArrowDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div className="flex-1 min-w-0">
+                <VideoCard video={v} layout="horizontal" {...cardProps} />
+              </div>
+              <button
+                type="button"
+                onClick={() => removeFromQueue(v.id)}
+                aria-label={`Remove ${v.title} from queue`}
+                className="p-2 rounded-full hover:bg-neutral-200 dark:hover:bg-[#272727] text-red-500 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -384,7 +1111,7 @@ export const SimpleVideoCollectionView: React.FC<
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
         <h2 className="text-xl font-bold">{title}</h2>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">Sign in to access your {title.toLowerCase()}.</p>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">Sign in with Google to access your {title.toLowerCase()}.</p>
         <button
           type="button"
           onClick={onOpenAuth}
@@ -397,7 +1124,7 @@ export const SimpleVideoCollectionView: React.FC<
   }
 
   return (
-    <div className="px-4 sm:px-6 py-4 pb-20">
+    <div className="px-4 sm:px-6 py-4 pb-24">
       <div className="mb-5">
         <h1 className="text-2xl font-bold">{title}</h1>
         {subtitle && <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-1">{subtitle}</p>}
@@ -406,7 +1133,7 @@ export const SimpleVideoCollectionView: React.FC<
       {loading ? (
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">Loading...</p>
       ) : videos.length === 0 ? (
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] py-10">No videos found in {title}.</p>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] py-10">No videos available yet. Check back soon.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
           {videos.map((v) => (
@@ -471,7 +1198,7 @@ export const ChannelView: React.FC<
   };
 
   return (
-    <div className="pb-20">
+    <div className="pb-24">
       <div className="h-32 sm:h-48 w-full" style={{ backgroundColor: channel.bannerColor || '#1f1f23' }} />
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 dark:border-[#272727]">

@@ -1,0 +1,144 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Public creator profile visible to authenticated users without exposing PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "avatarUrl": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "preferredLanguage": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "handle", "preferredLanguage", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII document strictly readable/writable by the owning user or admin.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "historyPaused": {
+          "type": "boolean"
+        },
+        "personalizationEnabled": {
+          "type": "boolean"
+        },
+        "restrictedMode": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "historyPaused", "personalizationEnabled", "restrictedMode", "createdAt", "updatedAt"]
+    },
+    "UserPreferenceDoc": {
+      "title": "UserPreferenceDoc",
+      "description": "User language, theme, and selected interest preferences synced for signed-in Google users.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["dark", "light"]
+        },
+        "preferredLanguage": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40
+        },
+        "selectedInterests": {
+          "type": "array",
+          "description": "Up to 15 interest tags"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "theme", "preferredLanguage", "selectedInterests", "updatedAt"]
+    },
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted admin marker document checked by Firestore rules.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "grantedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/public/profile": {
+      "schema": { "$ref": "#/entities/UserPublicProfile" },
+      "description": "Public display profile for a DopTube creator"
+    },
+    "/users/{userId}/private/info": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Owner-only PII and privacy flags"
+    },
+    "/user_preferences/{userId}": {
+      "schema": { "$ref": "#/entities/UserPreferenceDoc" },
+      "description": "Owner-only theme, language, and interest settings"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Admin role marker documents"
+    }
+  }
+}

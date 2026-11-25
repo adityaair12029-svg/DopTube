@@ -19,86 +19,6 @@ export function ensureMediaDirs() {
   }
 }
 
-export async function generateSeedVideoClip(params: {
-  videoId: string;
-  imagePath?: string;
-  durationSec?: number;
-  isShort?: boolean;
-  accentHex?: string;
-}): Promise<string> {
-  ensureMediaDirs();
-  const outFile = path.join(MEDIA_DIR, `${params.videoId}.mp4`);
-  if (fs.existsSync(outFile) && fs.statSync(outFile).size > 2048) {
-    return outFile;
-  }
-
-  const dur = Math.min(12, Math.max(6, params.durationSec ?? 8));
-  const width = params.isShort ? 540 : 960;
-  const height = params.isShort ? 960 : 540;
-  const resolvedImg = params.imagePath
-    ? path.resolve(process.cwd(), params.imagePath.replace(/^\//, ''))
-    : '';
-
-  try {
-    if (resolvedImg && fs.existsSync(resolvedImg)) {
-      await execFileAsync('ffmpeg', [
-        '-y',
-        '-loop', '1',
-        '-i', resolvedImg,
-        '-f', 'lavfi',
-        '-i', `sine=frequency=220:sample_rate=44100:duration=${dur}`,
-        '-filter_complex',
-        `[0:v]scale=${width * 1.12}:${height * 1.12}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.0012,1.08)':d=${dur * 24}:s=${width}x${height}:fps=24[v];[1:a]volume=0.04[a]`,
-        '-map', '[v]',
-        '-map', '[a]',
-        '-t', String(dur),
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-b:a', '64k',
-        '-movflags', '+faststart',
-        outFile,
-      ], { timeout: 25_000 });
-      return outFile;
-    }
-
-    const color = (params.accentHex ?? '#18181b').replace('#', '0x');
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-f', 'lavfi',
-      '-i', `color=c=${color}:s=${width}x${height}:d=${dur}:r=24`,
-      '-f', 'lavfi',
-      '-i', `sine=frequency=261.63:sample_rate=44100:duration=${dur}`,
-      '-filter_complex', '[1:a]volume=0.04[a]',
-      '-map', '0:v',
-      '-map', '[a]',
-      '-t', String(dur),
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '64k',
-      '-movflags', '+faststart',
-      outFile,
-    ], { timeout: 20_000 });
-    return outFile;
-  } catch {
-    // Fallback minimal valid silent clip if image filter fails
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-f', 'lavfi',
-      '-i', `color=c=0x141414:s=${width}x${height}:d=6:r=24`,
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart',
-      outFile,
-    ], { timeout: 15_000 });
-    return outFile;
-  }
-}
-
 export interface ProbeResult {
   durationSec: number;
   width: number;
@@ -107,13 +27,11 @@ export interface ProbeResult {
 
 export async function probeMediaFile(filePath: string): Promise<ProbeResult> {
   try {
-    const { stdout } = await execFileAsync('ffprobe', [
-      '-v', 'quiet',
-      '-print_format', 'json',
-      '-show_format',
-      '-show_streams',
-      filePath,
-    ], { timeout: 10_000 });
+    const { stdout } = await execFileAsync(
+      'ffprobe',
+      ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath],
+      { timeout: 10_000 }
+    );
     const parsed = JSON.parse(stdout) as {
       format?: { duration?: string };
       streams?: Array<{ codec_type?: string; width?: number; height?: number }>;
@@ -134,15 +52,11 @@ export async function extractThumbnail(videoPath: string, videoId: string): Prom
   ensureMediaDirs();
   const outThumb = path.join(THUMB_DIR, `${videoId}.jpg`);
   try {
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-ss', '00:00:01',
-      '-i', videoPath,
-      '-frames:v', '1',
-      '-vf', 'scale=640:-2',
-      '-q:v', '3',
-      outThumb,
-    ], { timeout: 15_000 });
+    await execFileAsync(
+      'ffmpeg',
+      ['-y', '-ss', '00:00:01', '-i', videoPath, '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '3', outThumb],
+      { timeout: 15_000 }
+    );
     if (fs.existsSync(outThumb)) {
       return `/api/thumbnails/${videoId}.jpg`;
     }
@@ -152,7 +66,10 @@ export async function extractThumbnail(videoPath: string, videoId: string): Prom
   }
 }
 
-export async function transcodeToHls(videoPath: string, videoId: string): Promise<{
+export async function transcodeToHls(
+  videoPath: string,
+  videoId: string
+): Promise<{
   hlsUrl: string | null;
   variants: Array<{ quality: string; resolution: string; bitrateKbps: number; playlistPath: string }>;
 }> {
@@ -167,35 +84,63 @@ export async function transcodeToHls(videoPath: string, videoId: string): Promis
   const masterPath = path.join(outDir, 'master.m3u8');
 
   try {
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-i', videoPath,
-      '-vf', 'scale=-2:360',
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-b:v', '600k',
-      '-c:a', 'aac',
-      '-b:a', '64k',
-      '-hls_time', '4',
-      '-hls_playlist_type', 'vod',
-      '-hls_segment_filename', path.join(outDir, '360p_%03d.ts'),
-      playlist360,
-    ], { timeout: 45_000 });
+    await execFileAsync(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        videoPath,
+        '-vf',
+        'scale=-2:360',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-b:v',
+        '600k',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '64k',
+        '-hls_time',
+        '4',
+        '-hls_playlist_type',
+        'vod',
+        '-hls_segment_filename',
+        path.join(outDir, '360p_%03d.ts'),
+        playlist360,
+      ],
+      { timeout: 45_000 }
+    );
 
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-i', videoPath,
-      '-vf', 'scale=-2:720',
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-b:v', '1400k',
-      '-c:a', 'aac',
-      '-b:a', '96k',
-      '-hls_time', '4',
-      '-hls_playlist_type', 'vod',
-      '-hls_segment_filename', path.join(outDir, '720p_%03d.ts'),
-      playlist720,
-    ], { timeout: 60_000 });
+    await execFileAsync(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        videoPath,
+        '-vf',
+        'scale=-2:720',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'ultrafast',
+        '-b:v',
+        '1400k',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '96k',
+        '-hls_time',
+        '4',
+        '-hls_playlist_type',
+        'vod',
+        '-hls_segment_filename',
+        path.join(outDir, '720p_%03d.ts'),
+        playlist720,
+      ],
+      { timeout: 60_000 }
+    );
 
     const masterContent = [
       '#EXTM3U',

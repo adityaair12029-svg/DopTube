@@ -12,6 +12,7 @@ import {
   Menu,
   Mic,
   Moon,
+  Music2,
   Plus,
   Search,
   Settings,
@@ -172,15 +173,15 @@ export const Header: React.FC<HeaderProps> = ({
   const unreadCount = notifications.filter((n) => n.isRead === 0).length;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-white dark:bg-[#0f0f0f] px-3 sm:px-4 flex items-center justify-between gap-2 sm:gap-4 border-b border-transparent dark:border-transparent">
+    <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-white dark:bg-[#0f0f0f] px-2 sm:px-4 flex items-center justify-between gap-1.5 sm:gap-4 border-b border-neutral-200/70 dark:border-transparent">
       {/* Left Zone: Hamburger + DopTube Logo */}
       {!mobileSearchOpen && (
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={onToggleSidebar}
             aria-label="Toggle navigation menu"
-            className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] transition-colors cursor-pointer"
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] transition-colors cursor-pointer"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -188,7 +189,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={() => onNavigate('home')}
             aria-label="DopTube Home"
-            className="py-1 px-1 rounded-lg focus-visible:outline-2 focus-visible:outline-[#ff0033] cursor-pointer"
+            className="py-1 px-0.5 sm:px-1 rounded-lg focus-visible:outline-2 focus-visible:outline-[#ff0033] cursor-pointer"
           >
             <DopTubeLogo />
           </button>
@@ -207,7 +208,7 @@ export const Header: React.FC<HeaderProps> = ({
             type="button"
             onClick={() => setMobileSearchOpen(false)}
             aria-label="Close mobile search"
-            className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] shrink-0"
+            className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -233,7 +234,7 @@ export const Header: React.FC<HeaderProps> = ({
               onFocus={() => setSearchFocused(true)}
               onChange={(e) => setInputVal(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Search"
+              placeholder="Search DopTube"
               aria-label="Search DopTube"
               className="w-full bg-transparent text-[15px] text-[#0f0f0f] dark:text-[#f1f1f1] placeholder:text-[#717171] dark:placeholder:text-[#888888] focus:outline-none"
             />
@@ -251,14 +252,14 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="submit"
             aria-label="Search"
-            className="h-10 w-16 rounded-r-full border border-l-0 border-neutral-300 dark:border-[#303030] bg-neutral-100 dark:bg-[#222222] hover:bg-neutral-200 dark:hover:bg-[#303030] flex items-center justify-center text-[#0f0f0f] dark:text-[#f1f1f1] transition-colors cursor-pointer shrink-0"
+            className="h-10 w-14 sm:w-16 rounded-r-full border border-l-0 border-neutral-300 dark:border-[#303030] bg-neutral-100 dark:bg-[#222222] hover:bg-neutral-200 dark:hover:bg-[#303030] flex items-center justify-center text-[#0f0f0f] dark:text-[#f1f1f1] transition-colors cursor-pointer shrink-0"
           >
             <Search className="w-5 h-5" />
           </button>
 
           {/* Search Suggestions & History Dropdown */}
           {searchFocused && combinedSuggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-16 mt-1.5 rounded-xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#303030] shadow-2xl py-2 z-50 overflow-hidden">
+            <div className="absolute top-full left-0 right-14 sm:right-16 mt-1.5 rounded-xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#303030] shadow-2xl py-2 z-50 overflow-hidden">
               {combinedSuggestions.map((item, idx) => (
                 <div
                   key={`${item.query}-${idx}`}
@@ -294,7 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <button
                         type="button"
                         onMouseDown={(e) => removeHistoryEntry(e, item.id)}
-                        className="text-xs text-[#3ea6ff] hover:underline px-1 cursor-pointer"
+                        className="text-xs text-[#065fd4] dark:text-[#3ea6ff] hover:underline px-1 cursor-pointer"
                       >
                         Remove
                       </button>
@@ -317,14 +318,26 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* Right Zone: Create, Notifications, Profile */}
+      {/* Right Zone: Theme Toggle, Mobile Search, Create, Notifications, Profile */}
       {!mobileSearchOpen && (
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+        <div className="flex items-center gap-0.5 sm:gap-2 shrink-0">
+          {/* Quick Light / Dark Theme Toggle */}
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={theme === 'dark' ? 'Switch to Light theme' : 'Switch to Dark theme'}
+            title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] transition-colors cursor-pointer"
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+
+          {/* Mobile Search Trigger */}
           <button
             type="button"
             onClick={() => setMobileSearchOpen(true)}
             aria-label="Open search"
-            className="md:hidden w-9 h-9 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] cursor-pointer"
+            className="md:hidden w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] cursor-pointer"
           >
             <Search className="w-5 h-5" />
           </button>
@@ -363,6 +376,17 @@ export const Header: React.FC<HeaderProps> = ({
                   type="button"
                   onClick={() => {
                     setCreateOpen(false);
+                    onNavigate('music');
+                  }}
+                  className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
+                >
+                  <Music2 className="w-4 h-4" />
+                  <span>DopTube Music</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateOpen(false);
                     onNavigate('studio');
                   }}
                   className="w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
@@ -375,7 +399,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Notifications */}
-          <div ref={notifRef} className="relative">
+          <div ref={notifRef} className={!user ? 'hidden sm:block relative' : 'relative'}>
             <button
               type="button"
               onClick={() => {
@@ -388,7 +412,7 @@ export const Header: React.FC<HeaderProps> = ({
                 if (next && unreadCount > 0) onMarkNotificationsRead();
               }}
               aria-label="Notifications"
-              className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] relative transition-colors cursor-pointer"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#272727] relative transition-colors cursor-pointer"
             >
               <Bell className="w-5 h-5" />
               {unreadCount > 0 && (
@@ -416,7 +440,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="max-h-96 overflow-y-auto divide-y divide-neutral-100 dark:divide-[#383838]">
                   {notifications.length === 0 ? (
                     <div className="p-6 text-center text-sm text-[#606060] dark:text-[#aaaaaa]">
-                      No notifications yet. Subscribe to Indian creators to get alerts here.
+                      No notifications yet. Subscribe to creators to receive upload alerts.
                     </div>
                   ) : (
                     notifications.map((n) => (
@@ -461,9 +485,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenAuth}
-              className="h-9 px-3.5 rounded-full border border-neutral-300 dark:border-[#3ea6ff]/40 text-[#065fd4] dark:text-[#3ea6ff] hover:bg-blue-50 dark:hover:bg-[#263850] text-sm font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="h-8 sm:h-9 px-2.5 sm:px-3.5 rounded-full border border-neutral-300 dark:border-[#3ea6ff]/40 text-[#065fd4] dark:text-[#3ea6ff] hover:bg-blue-50 dark:hover:bg-[#263850] text-xs sm:text-sm font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <User className="w-4 h-4" />
+              <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span>Sign in</span>
             </button>
           ) : (
@@ -516,12 +540,12 @@ export const Header: React.FC<HeaderProps> = ({
                       type="button"
                       onClick={() => {
                         setAccountOpen(false);
-                        onNavigate('settings');
+                        onNavigate('you');
                       }}
                       className="w-full px-4 py-2 text-left text-sm flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
                     >
                       <UserCheck className="w-4 h-4" />
-                      <span>DopTube Account</span>
+                      <span>Your You hub</span>
                     </button>
                     <button
                       type="button"
@@ -532,7 +556,7 @@ export const Header: React.FC<HeaderProps> = ({
                       className="w-full px-4 py-2 text-left text-sm flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
                     >
                       <User className="w-4 h-4" />
-                      <span>Switch account</span>
+                      <span>Switch Google account</span>
                     </button>
                     <button
                       type="button"
@@ -569,7 +593,7 @@ export const Header: React.FC<HeaderProps> = ({
                         className="w-full px-4 py-2 text-left text-sm flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] text-[#ff0033] font-medium cursor-pointer"
                       >
                         <ShieldAlert className="w-4 h-4" />
-                        <span>Admin Moderation Panel</span>
+                        <span>Admin & AI Analytics</span>
                       </button>
                     )}
                   </div>
@@ -582,7 +606,7 @@ export const Header: React.FC<HeaderProps> = ({
                     >
                       <span className="flex items-center gap-3">
                         {theme === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-                        <span>Appearance: {theme === 'dark' ? 'Dark' : 'Light'}</span>
+                        <span>Theme: {theme === 'dark' ? 'Dark' : 'Light'}</span>
                       </span>
                     </button>
                     <button
@@ -595,7 +619,7 @@ export const Header: React.FC<HeaderProps> = ({
                     >
                       <span className="flex items-center gap-3">
                         <Languages className="w-4 h-4" />
-                        <span>Display language: {user.preferredLanguage}</span>
+                        <span>Preferred language: {user.preferredLanguage}</span>
                       </span>
                     </button>
                     <button

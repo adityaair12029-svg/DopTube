@@ -1,11 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Ban,
   CheckCircle2,
   Clock,
+  EyeOff,
   Flag,
+  ListMusic,
   ListPlus,
   MoreVertical,
   PictureInPicture2,
+  Play,
   Radio,
   Share2,
 } from 'lucide-react';
@@ -22,6 +26,10 @@ interface VideoCardProps {
   onShare: (video: VideoItem) => void;
   onReport: (video: VideoItem) => void;
   onMiniPlayer?: (video: VideoItem) => void;
+  onPlayNext?: (videoId: string) => void;
+  onAddToQueue?: (videoId: string) => void;
+  onNotInterested?: (videoId: string) => void;
+  onDontRecommendCreator?: (channelId: string, channelName: string) => void;
 }
 
 export const VideoCard: React.FC<VideoCardProps> = ({
@@ -34,6 +42,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   onShare,
   onReport,
   onMiniPlayer,
+  onPlayNext,
+  onAddToQueue,
+  onNotInterested,
+  onDontRecommendCreator,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -62,7 +74,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           ? 'w-full sm:w-[360px] md:w-[400px] aspect-video rounded-xl'
           : layout === 'compact'
           ? 'w-40 aspect-video rounded-lg'
-          : 'w-full aspect-video rounded-xl'
+          : 'w-full aspect-video rounded-none sm:rounded-xl'
       }`}
     >
       <button
@@ -120,7 +132,33 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <MoreVertical className="w-4 h-4" />
       </button>
       {menuOpen && (
-        <div className="absolute right-0 top-9 w-52 rounded-xl bg-white dark:bg-[#282828] border border-neutral-200 dark:border-[#3e3e3e] shadow-2xl py-1.5 z-40 text-sm">
+        <div className="absolute right-0 top-9 w-56 rounded-xl bg-white dark:bg-[#282828] border border-neutral-200 dark:border-[#3e3e3e] shadow-2xl py-1.5 z-40 text-sm">
+          {onPlayNext && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onPlayNext(video.id);
+              }}
+              className="w-full px-3.5 py-2 text-left flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
+            >
+              <Play className="w-4 h-4" />
+              <span>Play next</span>
+            </button>
+          )}
+          {onAddToQueue && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onAddToQueue(video.id);
+              }}
+              className="w-full px-3.5 py-2 text-left flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
+            >
+              <ListMusic className="w-4 h-4" />
+              <span>Add to queue</span>
+            </button>
+          )}
           {onMiniPlayer && (
             <button
               type="button"
@@ -167,6 +205,35 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             <Share2 className="w-4 h-4" />
             <span>Share</span>
           </button>
+          {(onNotInterested || onDontRecommendCreator) && (
+            <div className="my-1 border-t border-neutral-200 dark:border-[#3e3e3e]" />
+          )}
+          {onNotInterested && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onNotInterested(video.id);
+              }}
+              className="w-full px-3.5 py-2 text-left flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
+            >
+              <EyeOff className="w-4 h-4" />
+              <span>Not interested</span>
+            </button>
+          )}
+          {onDontRecommendCreator && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onDontRecommendCreator(video.channelId, video.channelName);
+              }}
+              className="w-full px-3.5 py-2 text-left flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-[#3e3e3e] cursor-pointer"
+            >
+              <Ban className="w-4 h-4" />
+              <span>Don’t recommend creator</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -252,11 +319,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     );
   }
 
-  // Grid Card (matches homepage screenshot proportions)
+  // Grid Card (mobile edge-to-edge thumbnails, desktop rounded cards)
   return (
     <article className="flex flex-col">
       {thumbnailBox}
-      <div className="mt-3 flex items-start gap-3">
+      <div className="mt-3 px-3 sm:px-0 flex items-start gap-3">
         <button
           type="button"
           onClick={() => onOpenChannel(video.channelId)}

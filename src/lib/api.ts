@@ -2,6 +2,7 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
   const res = await fetch(url, {
     credentials: 'include',
     headers: {
+      'X-Requested-With': 'DopTube',
       ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...(options?.headers ?? {}),
     },
@@ -24,6 +25,7 @@ export function uploadWithProgress(
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     xhr.withCredentials = true;
+    xhr.setRequestHeader('X-Requested-With', 'DopTube');
 
     xhr.upload.onprogress = (evt) => {
       if (evt.lengthComputable) {
