@@ -52,11 +52,12 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [page, setPage] = useState<AppPage>(() => {
     const params = new URLSearchParams(window.location.search);
+    if (params.get('shorts')) return 'shorts';
     return params.get('watch') ? 'watch' : 'home';
   });
   const [pageParam, setPageParam] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('watch') || '';
+    return params.get('shorts') || params.get('watch') || '';
   });
 
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
@@ -69,9 +70,13 @@ export default function App() {
   const [sections, setSections] = useState<HomepageSection[]>([]);
   const [shorts, setShorts] = useState<VideoItem[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [homeNextPageToken, setHomeNextPageToken] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [feedLoading, setFeedLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [shortsNextPageToken, setShortsNextPageToken] = useState('');
+  const [shortsHasMore, setShortsHasMore] = useState(false);
+  const [shortsLoadingMore, setShortsLoadingMore] = useState(false);
 
   // Playback, Autoplay & Queue state
   const [queue, setQueue] = useState<VideoItem[]>([]);
@@ -88,6 +93,9 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<VideoItem[]>([]);
   const [searchChannels, setSearchChannels] = useState<ChannelSummary[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchNextPageToken, setSearchNextPageToken] = useState('');
+  const [searchHasMore, setSearchHasMore] = useState(false);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
   const [searchSort, setSearchSort] = useState<'relevance' | 'date' | 'views'>('relevance');
   const [searchDuration, setSearchDuration] = useState<'all' | 'short' | 'medium' | 'long'>('all');
   const [searchLanguage, setSearchLanguage] = useState('All');
@@ -175,23 +183,28 @@ export default function App() {
           videos: VideoItem[];
           sections: HomepageSection[];
           nextCursor: number | null;
+          nextPageToken?: string | null;
           hasMore: boolean;
         }>(
           `/api/recommendations/home?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(
             selectedLanguage
           )}&cursor=0&limit=12`
         ),
-        apiFetch<{ videos: VideoItem[] }>('/api/recommendations/shorts'),
+        apiFetch<{ videos: VideoItem[]; nextPageToken?: string | null; hasMore?: boolean }>('/api/recommendations/shorts'),
       ]);
       setVideos(mainRes.videos);
       setSections(mainRes.sections || []);
       setNextCursor(mainRes.nextCursor ?? null);
+      setHomeNextPageToken(mainRes.nextPageToken || '');
       setHasMore(Boolean(mainRes.hasMore));
       setShorts(shortsRes.videos);
+      setShortsNextPageToken(shortsRes.nextPageToken || '');
+      setShortsHasMore(Boolean(shortsRes.hasMore || shortsRes.nextPageToken));
     } catch {
       setVideos([]);
       setSections([]);
       setNextCursor(null);
+      setHomeNextPageToken('');
       setHasMore(false);
     } finally {
       setFeedLoading(false);
@@ -203,17 +216,19 @@ export default function App() {
   }, [loadFeed]);
 
   const handleLoadMore = useCallback(async () => {
-    if (loadingMore || !hasMore || nextCursor === null) return;
+    if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
+      const tokenQs = homeNextPageToken ? `&pageToken=${encodeURIComponent(homeNextPageToken)}` : '';
       const res = await apiFetch<{
         videos: VideoItem[];
         nextCursor: number | null;
+        nextPageToken?: string | null;
         hasMore: boolean;
       }>(
         `/api/recommendations/home?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(
           selectedLanguage
-        )}&cursor=${nextCursor}&limit=12`
+        )}&cursor=${nextCursor ?? 0}&limit=12${tokenQs}`
       );
       setVideos((prev) => {
         const existing = new Set(prev.map((v) => v.id));
@@ -221,32 +236,94 @@ export default function App() {
         return [...prev, ...appended];
       });
       setNextCursor(res.nextCursor ?? null);
+      setHomeNextPageToken(res.nextPageToken || '');
       setHasMore(Boolean(res.hasMore));
     } catch {
       setHasMore(false);
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, nextCursor, selectedCategory, selectedLanguage]);
+  }, [loadingMore, hasMore, nextCursor, homeNextPageToken, selectedCategory, selectedLanguage]);
+
+  const handleLoadMoreShorts = useCallback(async () => {
+    if (shortsLoadingMore || !shortsHasMore || !shortsNextPageToken) return;
+    setShortsLoadingMore(true);
+    try {
+      const res = await apiFetch<{
+        videos: VideoItem[];
+        nextPageToken?: string | null;
+        hasMore?: boolean;
+      }>(`/api/recommendations/shorts?pageToken=${encodeURIComponent(shortsNextPageToken)}`);
+      setShorts((prev) => {
+        const existing = new Set(prev.map((s) => s.id));
+        const appended = res.videos.filter((s) => !existing.has(s.id));
+        return [...prev, ...appended];
+      });
+      setShortsNextPageToken(res.nextPageToken || '');
+      setShortsHasMore(Boolean(res.hasMore || res.nextPageToken));
+    } catch {
+      setShortsHasMore(false);
+    } finally {
+      setShortsLoadingMore(false);
+    }
+  }, [shortsLoadingMore, shortsHasMore, shortsNextPageToken]);
 
   const executeSearch = useCallback(
     async (q: string, sort = searchSort, duration = searchDuration, lang = searchLanguage) => {
       setSearchLoading(true);
+      setSearchNextPageToken('');
+      setSearchHasMore(false);
       try {
-        const res = await apiFetch<{ videos: VideoItem[]; channels: ChannelSummary[] }>(
+        const res = await apiFetch<{
+          videos: VideoItem[];
+          channels: ChannelSummary[];
+          nextPageToken?: string | null;
+          hasMore?: boolean;
+        }>(
           `/api/search?q=${encodeURIComponent(q)}&sort=${sort}&duration=${duration}&language=${encodeURIComponent(lang)}`
         );
         setSearchResults(res.videos);
         setSearchChannels(res.channels);
+        setSearchNextPageToken(res.nextPageToken || '');
+        setSearchHasMore(Boolean(res.hasMore || res.nextPageToken));
       } catch {
         setSearchResults([]);
         setSearchChannels([]);
+        setSearchNextPageToken('');
+        setSearchHasMore(false);
       } finally {
         setSearchLoading(false);
       }
     },
     [searchSort, searchDuration, searchLanguage]
   );
+
+  const handleLoadMoreSearch = useCallback(async () => {
+    if (searchLoadingMore || !searchHasMore || !searchNextPageToken) return;
+    setSearchLoadingMore(true);
+    try {
+      const res = await apiFetch<{
+        videos: VideoItem[];
+        nextPageToken?: string | null;
+        hasMore?: boolean;
+      }>(
+        `/api/search?q=${encodeURIComponent(searchQuery)}&sort=${searchSort}&duration=${searchDuration}&language=${encodeURIComponent(
+          searchLanguage
+        )}&pageToken=${encodeURIComponent(searchNextPageToken)}`
+      );
+      setSearchResults((prev) => {
+        const existing = new Set(prev.map((v) => v.id));
+        const appended = res.videos.filter((v) => !existing.has(v.id));
+        return [...prev, ...appended];
+      });
+      setSearchNextPageToken(res.nextPageToken || '');
+      setSearchHasMore(Boolean(res.hasMore || res.nextPageToken));
+    } catch {
+      setSearchHasMore(false);
+    } finally {
+      setSearchLoadingMore(false);
+    }
+  }, [searchLoadingMore, searchHasMore, searchNextPageToken, searchQuery, searchSort, searchDuration, searchLanguage]);
 
   useEffect(() => {
     if (page === 'search') {
@@ -262,6 +339,10 @@ export default function App() {
       setActiveMusicTrack(null);
       setSidebarExpanded(false);
       window.history.replaceState({}, '', `/?watch=${encodeURIComponent(param)}`);
+    } else if (nextPage === 'shorts') {
+      setMiniPlayerVideo(null);
+      setActiveMusicTrack(null);
+      window.history.replaceState({}, '', param ? `/?shorts=${encodeURIComponent(param)}` : '/?shorts=1');
     } else {
       if (nextPage === 'home') {
         setSidebarExpanded(true);
@@ -271,15 +352,53 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
 
+  const openShort = useCallback(
+    (shortId: string, shortVideo?: VideoItem) => {
+      if (shortVideo) {
+        setShorts((prev) => (prev.some((s) => s.id === shortVideo.id) ? prev : [shortVideo, ...prev]));
+      }
+      navigateTo('shorts', shortId);
+    },
+    [navigateTo]
+  );
+
+  useEffect(() => {
+    if (page !== 'shorts' || !pageParam || pageParam === '1') return;
+    if (shorts.some((s) => s.id === pageParam)) return;
+    let cancelled = false;
+    apiFetch<{ video: VideoItem }>(`/api/videos/${encodeURIComponent(pageParam)}`)
+      .then((res) => {
+        if (cancelled || !res.video) return;
+        setShorts((prev) => (prev.some((s) => s.id === res.video.id) ? prev : [res.video, ...prev]));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [page, pageParam, shorts]);
+
   const handleWatch = useCallback(
-    (videoId: string) => {
+    (videoId: string, clickedVideo?: VideoItem) => {
       apiFetch('/api/recommendations/click', {
         method: 'POST',
         body: JSON.stringify({ videoId }),
       }).catch(() => {});
+
+      const resolved =
+        clickedVideo ||
+        videos.find((v) => v.id === videoId) ||
+        shorts.find((s) => s.id === videoId) ||
+        searchResults.find((v) => v.id === videoId) ||
+        queue.find((v) => v.id === videoId) ||
+        sections.flatMap((s) => s.videos).find((v) => v.id === videoId);
+
+      if (resolved?.isShort) {
+        openShort(videoId, resolved);
+        return;
+      }
       navigateTo('watch', videoId);
     },
-    [navigateTo]
+    [navigateTo, openShort, videos, shorts, searchResults, queue, sections]
   );
 
   const handleImpressions = useCallback((videoIds: string[]) => {
@@ -493,7 +612,7 @@ export default function App() {
   };
 
   const mainMarginClass = sidebarExpanded ? 'md:ml-60' : 'md:ml-[72px]';
-  const infiniteScrollEnabled = user?.preferences?.infiniteScrollEnabled ?? true;
+  const infiniteScrollEnabled = true;
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0f0f0f] text-[#0f0f0f] dark:text-[#f1f1f1]">
@@ -550,7 +669,7 @@ export default function App() {
             onSelectCategory={setSelectedCategory}
             onSelectLanguage={setSelectedLanguage}
             onLoadMore={handleLoadMore}
-            onOpenShort={(shortId) => navigateTo('shorts', shortId)}
+            onOpenShort={(shortId, shortObj) => openShort(shortId, shortObj)}
             onImpressions={handleImpressions}
             {...commonCardActions}
           />
@@ -562,6 +681,9 @@ export default function App() {
             videos={searchResults}
             channels={searchChannels}
             loading={searchLoading}
+            loadingMore={searchLoadingMore}
+            hasMore={searchHasMore}
+            onLoadMore={handleLoadMoreSearch}
             sort={searchSort}
             duration={searchDuration}
             language={searchLanguage}
@@ -584,6 +706,7 @@ export default function App() {
             onChangeAutoplayMode={(mode) => setAutoplayMode(mode)}
             onQueueChanged={loadQueue}
             onWatch={handleWatch}
+            onRedirectToShort={(v) => openShort(v.id, v)}
             onOpenChannel={(id) => navigateTo('channel', id)}
             onOpenAuth={() => setAuthOpen(true)}
             onSavePlaylist={handleSavePlaylist}
@@ -603,6 +726,10 @@ export default function App() {
             shorts={shorts}
             initialShortId={pageParam}
             user={user}
+            hasMore={shortsHasMore}
+            loadingMore={shortsLoadingMore}
+            onLoadMore={handleLoadMoreShorts}
+            onSubscriptionsChanged={loadUserContext}
             onOpenAuth={() => setAuthOpen(true)}
             onOpenChannel={(id) => navigateTo('channel', id)}
             onSavePlaylist={handleSavePlaylist}

@@ -9,8 +9,13 @@ ensureMediaDirs();
 const DB_PATH = path.join(DATA_DIR, 'doptube.db');
 export const db = new DatabaseSync(DB_PATH);
 
+try {
+  db.exec('PRAGMA journal_mode = WAL;');
+} catch {
+  // Serverless /tmp filesystems may not support WAL; fall back to default journal mode
+}
+
 db.exec(`
-  PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
 
   CREATE TABLE IF NOT EXISTS users (

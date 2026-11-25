@@ -18,8 +18,8 @@ interface HomeViewProps {
   onSelectCategory: (cat: string) => void;
   onSelectLanguage: (lang: string) => void;
   onLoadMore: () => void;
-  onWatch: (videoId: string) => void;
-  onOpenShort: (shortId: string) => void;
+  onWatch: (videoId: string, video?: VideoItem) => void;
+  onOpenShort: (shortId: string, shortVideo?: VideoItem) => void;
   onOpenChannel: (channelId: string) => void;
   onSaveWatchLater: (videoId: string) => void;
   onSavePlaylist: (videoId: string) => void;
@@ -73,7 +73,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   }, [videos, onImpressions]);
 
   useEffect(() => {
-    if (!infiniteScrollEnabled || !hasMore || loadingMore) return;
+    if (!hasMore || loadingMore) return;
     const el = sentinelRef.current;
     if (!el) return;
     const obs = new IntersectionObserver(
@@ -86,7 +86,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [infiniteScrollEnabled, hasMore, loadingMore, onLoadMore]);
+  }, [hasMore, loadingMore, onLoadMore]);
 
   const cardActions = {
     onWatch,
@@ -102,8 +102,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
     onDontRecommendCreator,
   };
 
-  const topRow = videos.slice(0, 6);
-  const restVideos = videos.slice(6);
+  const topRow = videos.slice(0, 4);
+  const restVideos = videos.slice(4);
   const isFiltered = selectedCategory !== 'All' || selectedLanguage !== 'All';
 
   return (
@@ -201,7 +201,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <article key={s.id} className="group">
                     <button
                       type="button"
-                      onClick={() => onOpenShort(s.id)}
+                      onClick={() => onOpenShort(s.id, s)}
                       aria-label={`Play Short: ${s.title}`}
                       className="relative w-full aspect-[9/16] rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#1f1f1f] block cursor-pointer"
                     >
@@ -218,7 +218,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                       <div className="min-w-0 flex-1">
                         <button
                           type="button"
-                          onClick={() => onOpenShort(s.id)}
+                          onClick={() => onOpenShort(s.id, s)}
                           className="text-left text-[14px] font-semibold leading-snug line-clamp-2 text-[#0f0f0f] dark:text-[#f1f1f1] cursor-pointer"
                         >
                           {s.title}
@@ -251,22 +251,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </section>
           )}
 
-          {/* Infinite Scroll Sentinel / Manual Load More */}
+          {/* Infinite Scroll Sentinel */}
           <div ref={sentinelRef} className="mt-10 flex flex-col items-center justify-center py-4">
             {loadingMore && (
               <div className="flex items-center gap-2 text-sm text-[#606060] dark:text-[#aaaaaa]">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span>Loading more recommendations...</span>
               </div>
-            )}
-            {!loadingMore && hasMore && !infiniteScrollEnabled && (
-              <button
-                type="button"
-                onClick={onLoadMore}
-                className="h-9 px-6 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-sm font-medium cursor-pointer"
-              >
-                Load more
-              </button>
             )}
             {!hasMore && videos.length > 0 && (
               <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">You’re all caught up</p>

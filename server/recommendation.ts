@@ -284,15 +284,17 @@ export function rankRelatedVideos(
   candidates: CandidateVideo[],
   ctx: UserAiContext
 ): CandidateVideo[] {
-  const valid = candidates.filter((c) => c.id !== currentVideo.id && validateContentCandidate(c, ctx.validation).valid);
+  const valid = candidates.filter(
+    (c) => c.id !== currentVideo.id && !c.isShort && validateContentCandidate(c, ctx.validation).valid
+  );
   const currentTags = new Set(currentVideo.tags.map((t) => t.toLowerCase()));
 
-  return [...valid].sort((a, b) => {
+  const sorted = [...valid].sort((a, b) => {
     const simScore = (v: CandidateVideo) => {
       let s = scoreCandidate(v, ctx) * 0.4;
       if (v.category === currentVideo.category) s += 35;
       if (v.language === currentVideo.language) s += 18;
-      if (v.channelId === currentVideo.channelId) s += 22;
+      if (v.channelId === currentVideo.channelId) s += 12;
       for (const tag of v.tags) {
         if (currentTags.has(tag.toLowerCase())) s += 12;
       }
@@ -300,6 +302,8 @@ export function rankRelatedVideos(
     };
     return simScore(b) - simScore(a);
   });
+
+  return diversifyFeed(sorted, 2, 3);
 }
 
 export function rankShortsFeed(candidates: CandidateVideo[], ctx: UserAiContext, nowMs = Date.now()): CandidateVideo[] {
@@ -319,7 +323,7 @@ export function rankShortsFeed(candidates: CandidateVideo[], ctx: UserAiContext,
       .map((v) => ({ ...v, _s: scoreCandidate(v, ctx, shortsWeights, nowMs) }))
       .sort((a, b) => b._s - a._s),
     1,
-    1
+    2
   );
 }
 

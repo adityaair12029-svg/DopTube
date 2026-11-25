@@ -9,9 +9,25 @@ export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T
     ...options,
   });
 
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text();
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (!res.ok) {
+        throw new Error(`Server returned non-JSON response (${res.status})`);
+      }
+      throw new Error('Unexpected non-JSON response from DopTube server.');
+    }
+  }
+
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+    const errMsg =
+      typeof data === 'object' && data !== null && 'error' in data
+        ? String((data as { error?: string }).error || '')
+        : '';
+    throw new Error(errMsg || `Request failed (${res.status})`);
   }
   return data as T;
 }

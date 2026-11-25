@@ -257,3 +257,36 @@ test('conditional sections only emit non-empty sections and detectInteractionAno
   assert.equal(detectInteractionAnomaly(burst, 10_000, 16), true);
   assert.equal(detectInteractionAnomaly([1000, 5000, 9000], 10_000, 16), false);
 });
+
+test('rankRelatedVideos enforces creator diversity and excludes Shorts; rankShortsFeed excludes full videos', () => {
+  const current = makeCandidate({ id: 'cur', channelId: 'ch_main', category: 'Education' });
+  const sameCreatorVideos = Array.from({ length: 5 }, (_, i) =>
+    makeCandidate({ id: `same_${i}`, channelId: 'ch_main', category: 'Education', views: 50000 - i * 100 })
+  );
+  const otherCreators = [
+    makeCandidate({ id: 'other_1', channelId: 'ch_other_1', category: 'Education', views: 40000 }),
+    makeCandidate({ id: 'other_2', channelId: 'ch_other_2', category: 'Education', views: 39000 }),
+    makeCandidate({ id: 'other_3', channelId: 'ch_other_3', category: 'Technology', views: 38000 }),
+    makeCandidate({ id: 'short_rel', channelId: 'ch_main', isShort: true, durationSec: 25 }),
+  ];
+
+  const related = rankRelatedVideos(current, [...sameCreatorVideos, ...otherCreators], makeAiContext());
+  assert.equal(related.some((v) => v.id === 'short_rel'), false);
+  // Check no more than 2 consecutive items share the same channelId
+  for (let i = 2; i < related.length; i++) {
+    const allSame = related[i].channelId === related[i - 1].channelId && related[i].channelId === related[i - 2].channelId;
+    assert.equal(allSame, false);
+  }
+
+  const shortsOnly = rankShortsFeed(
+    [
+      makeCandidate({ id: 'full_1', isShort: false, durationSec: 400 }),
+      makeCandidate({ id: 'short_1', isShort: true, durationSec: 30, channelId: 'ch_a' }),
+      makeCandidate({ id: 'short_2', isShort: true, durationSec: 45, channelId: 'ch_b' }),
+    ],
+    makeAiContext()
+  );
+  assert.equal(shortsOnly.length, 2);
+  assert.ok(shortsOnly.every((v) => v.isShort));
+});
+

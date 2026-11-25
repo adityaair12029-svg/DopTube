@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -12,6 +12,7 @@ import {
   History,
   ListMusic,
   ListVideo,
+  Loader2,
   Music2,
   Pause,
   Play,
@@ -29,7 +30,7 @@ import { formatViews } from '../lib/format';
 import { VideoCard } from '../components/VideoCard';
 
 interface CommonCardProps {
-  onWatch: (videoId: string) => void;
+  onWatch: (videoId: string, video?: VideoItem) => void;
   onOpenChannel: (channelId: string) => void;
   onSaveWatchLater: (videoId: string) => void;
   onSavePlaylist: (videoId: string) => void;
@@ -207,7 +208,7 @@ export const YouView: React.FC<
               <button
                 key={v.id}
                 type="button"
-                onClick={() => onWatch(v.id)}
+                onClick={() => onWatch(v.id, v)}
                 className="w-40 shrink-0 text-left group cursor-pointer"
               >
                 <div className="relative aspect-video rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#1f1f1f]">
@@ -1003,7 +1004,7 @@ export const QueueView: React.FC<
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => cardProps.onWatch(queue[0].id)}
+              onClick={() => cardProps.onWatch(queue[0].id, queue[0])}
               className="h-9 px-4 rounded-full bg-[#ff0033] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5" />
@@ -1094,18 +1095,83 @@ export const SimpleVideoCollectionView: React.FC<
 > = ({ title, subtitle, endpoint, requiresAuth, user, onOpenAuth, allowNativeDownload, ...cardProps }) => {
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextPageToken, setNextPageToken] = useState<string>('');
+  const [hasMoreServer, setHasMoreServer] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(16);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (requiresAuth && !user) {
       setLoading(false);
       return;
     }
+    let cancelled = false;
     setLoading(true);
-    apiFetch<{ videos: VideoItem[] }>(endpoint)
-      .then((res) => setVideos(res.videos))
-      .catch(() => setVideos([]))
-      .finally(() => setLoading(false));
+    setVisibleCount(16);
+    setNextPageToken('');
+    setHasMoreServer(false);
+    apiFetch<{ videos: VideoItem[]; nextPageToken?: string | null; hasMore?: boolean }>(endpoint)
+      .then((res) => {
+        if (cancelled) return;
+        setVideos(res.videos || []);
+        setNextPageToken(res.nextPageToken || '');
+        setHasMoreServer(Boolean(res.nextPageToken || res.hasMore));
+      })
+      .catch(() => {
+        if (!cancelled) setVideos([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [endpoint, user?.id, requiresAuth]);
+
+  const loadMoreCollection = useCallback(async () => {
+    if (visibleCount < videos.length) {
+      setVisibleCount((c) => c + 16);
+      return;
+    }
+    if (!hasMoreServer || !nextPageToken || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const sep = endpoint.includes('?') ? '&' : '?';
+      const res = await apiFetch<{ videos: VideoItem[]; nextPageToken?: string | null; hasMore?: boolean }>(
+        `${endpoint}${sep}pageToken=${encodeURIComponent(nextPageToken)}`
+      );
+      setVideos((prev) => {
+        const seen = new Set(prev.map((v) => v.id));
+        const appended = (res.videos || []).filter((v) => !seen.has(v.id));
+        return [...prev, ...appended];
+      });
+      setVisibleCount((c) => c + 16);
+      setNextPageToken(res.nextPageToken || '');
+      setHasMoreServer(Boolean(res.nextPageToken || res.hasMore));
+    } catch {
+      setHasMoreServer(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [endpoint, hasMoreServer, loadingMore, nextPageToken, videos.length, visibleCount]);
+
+  useEffect(() => {
+    if (loading || loadingMore) return;
+    if (visibleCount >= videos.length && !hasMoreServer) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadMoreCollection();
+        }
+      },
+      { rootMargin: '250px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loading, loadingMore, visibleCount, videos.length, hasMoreServer, loadMoreCollection]);
 
   if (requiresAuth && !user) {
     return (
@@ -1123,6 +1189,8 @@ export const SimpleVideoCollectionView: React.FC<
     );
   }
 
+  const displayedVideos = videos.slice(0, visibleCount);
+
   return (
     <div className="px-4 sm:px-6 py-4 pb-24">
       <div className="mb-5">
@@ -1135,23 +1203,34 @@ export const SimpleVideoCollectionView: React.FC<
       ) : videos.length === 0 ? (
         <p className="text-sm text-[#606060] dark:text-[#aaaaaa] py-10">No videos available yet. Check back soon.</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
-          {videos.map((v) => (
-            <div key={v.id} className="space-y-2">
-              <VideoCard video={v} {...cardProps} />
-              {allowNativeDownload && v.sourceType === 'native' && (
-                <a
-                  href={v.videoUrl}
-                  download={`${v.id}.mp4`}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-[#065fd4] dark:text-[#3ea6ff] hover:underline"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download MP4 (Authorized DopTube Host)
-                </a>
-              )}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
+            {displayedVideos.map((v) => (
+              <div key={v.id} className="space-y-2">
+                <VideoCard video={v} {...cardProps} />
+                {allowNativeDownload && v.sourceType === 'native' && (
+                  <a
+                    href={v.videoUrl}
+                    download={`${v.id}.mp4`}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[#065fd4] dark:text-[#3ea6ff] hover:underline"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download MP4 (Authorized DopTube Host)
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div ref={sentinelRef} className="mt-8 flex items-center justify-center py-4">
+            {loadingMore && (
+              <div className="flex items-center gap-2 text-sm text-[#606060] dark:text-[#aaaaaa]">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Loading more videos...</span>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -1169,17 +1248,89 @@ export const ChannelView: React.FC<
   const [channel, setChannel] = useState<ChannelSummary | null>(null);
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextPageToken, setNextPageToken] = useState('');
+  const [hasMore, setHasMore] = useState(false);
+  const [totalResults, setTotalResults] = useState(0);
+  const [tab, setTab] = useState<'all' | 'videos' | 'shorts'>('all');
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    apiFetch<{ channel: ChannelSummary; videos: VideoItem[] }>(`/api/channels/${channelId}`)
+    setVideos([]);
+    setNextPageToken('');
+    setHasMore(false);
+    setTotalResults(0);
+    setTab('all');
+
+    apiFetch<{
+      channel: ChannelSummary;
+      videos: VideoItem[];
+      nextPageToken?: string | null;
+      hasMore?: boolean;
+      totalResults?: number;
+    }>(`/api/channels/${channelId}`)
       .then((res) => {
+        if (cancelled) return;
         setChannel(res.channel);
-        setVideos(res.videos);
+        setVideos(res.videos || []);
+        setNextPageToken(res.nextPageToken || '');
+        setHasMore(Boolean(res.hasMore && res.nextPageToken));
+        setTotalResults(res.totalResults ?? res.channel.totalResults ?? (res.videos || []).length);
       })
-      .catch(() => setChannel(null))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!cancelled) setChannel(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [channelId]);
+
+  const loadMoreChannelVideos = useCallback(async () => {
+    if (loadingMore || !hasMore || !nextPageToken) return;
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch<{
+        videos: VideoItem[];
+        nextPageToken?: string | null;
+        hasMore?: boolean;
+        totalResults?: number;
+      }>(`/api/channels/${channelId}?pageToken=${encodeURIComponent(nextPageToken)}`);
+      setVideos((prev) => {
+        const seen = new Set(prev.map((v) => v.id));
+        const appended = (res.videos || []).filter((v) => !seen.has(v.id));
+        return [...prev, ...appended];
+      });
+      setNextPageToken(res.nextPageToken || '');
+      setHasMore(Boolean(res.hasMore && res.nextPageToken));
+      if (res.totalResults) setTotalResults(res.totalResults);
+    } catch {
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [channelId, hasMore, loadingMore, nextPageToken]);
+
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadMoreChannelVideos();
+        }
+      },
+      { rootMargin: '300px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loading, loadingMore, hasMore, loadMoreChannelVideos]);
 
   if (loading) return <div className="p-8 text-sm text-[#606060] dark:text-[#aaaaaa]">Loading channel...</div>;
   if (!channel) return <div className="p-8 text-sm">Channel not found.</div>;
@@ -1196,6 +1347,11 @@ export const ChannelView: React.FC<
     onSubscriptionsChanged();
     onToast(res.subscribed ? `Subscribed to ${channel.name}` : `Unsubscribed from ${channel.name}`);
   };
+
+  const fullVideos = videos.filter((v) => !v.isShort);
+  const shortVideos = videos.filter((v) => v.isShort);
+  const filteredVideos = tab === 'videos' ? fullVideos : tab === 'shorts' ? shortVideos : videos;
+  const displayedTotal = Math.max(totalResults, videos.length);
 
   return (
     <div className="pb-24">
@@ -1215,7 +1371,7 @@ export const ChannelView: React.FC<
                 {channel.verified && <CheckCircle2 className="w-5 h-5" />}
               </h1>
               <p className="text-xs sm:text-sm text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
-                {channel.handle} · {formatViews(channel.subscriberCount)} subscribers · {videos.length} videos
+                {channel.handle} · {formatViews(channel.subscriberCount)} subscribers · {formatViews(displayedTotal)} videos
               </p>
               {channel.description && (
                 <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-1.5 max-w-2xl">{channel.description}</p>
@@ -1236,17 +1392,88 @@ export const ChannelView: React.FC<
           </button>
         </div>
 
+        {/* All / Videos / Shorts Filter Tabs */}
+        <div className="mt-5 flex items-center gap-2 border-b border-neutral-200 dark:border-[#272727] pb-3">
+          {(
+            [
+              ['all', `All (${videos.length})`],
+              ['videos', `Videos (${fullVideos.length})`],
+              ['shorts', `Shorts (${shortVideos.length})`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`h-9 px-4 rounded-lg text-sm font-semibold cursor-pointer ${
+                tab === id
+                  ? 'bg-[#0f0f0f] text-white dark:bg-white dark:text-[#0f0f0f]'
+                  : 'bg-neutral-100 dark:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-neutral-200 dark:hover:bg-[#383838]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="mt-6">
-          <h2 className="text-base font-bold mb-4">Videos</h2>
-          {videos.length === 0 ? (
-            <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">No public videos uploaded yet.</p>
+          {filteredVideos.length === 0 ? (
+            <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
+              {hasMore ? 'Loading more creator uploads...' : 'No public videos in this tab yet.'}
+            </p>
+          ) : tab === 'shorts' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {filteredVideos.map((v) => (
+                <article key={v.id} className="group">
+                  <button
+                    type="button"
+                    onClick={() => cardProps.onWatch(v.id, v)}
+                    className="relative w-full aspect-[9/16] rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#1f1f1f] block cursor-pointer"
+                  >
+                    <img
+                      src={v.thumbnailUrl}
+                      alt={v.title}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cardProps.onWatch(v.id, v)}
+                    className="mt-2 text-left text-sm font-semibold line-clamp-2 cursor-pointer"
+                  >
+                    {v.title}
+                  </button>
+                  <p className="text-xs text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+                    {formatViews(v.views)} views
+                  </p>
+                </article>
+              ))}
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-8">
-              {videos.map((v) => (
+              {filteredVideos.map((v) => (
                 <VideoCard key={v.id} video={v} {...cardProps} />
               ))}
             </div>
           )}
+
+          {/* Infinite Scroll Sentinel for All Creator Uploads */}
+          <div ref={sentinelRef} className="mt-10 flex flex-col items-center justify-center py-4">
+            {loadingMore && (
+              <div className="flex items-center gap-2 text-sm text-[#606060] dark:text-[#aaaaaa]">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Loading more creator videos...</span>
+              </div>
+            )}
+            {!hasMore && videos.length > 0 && (
+              <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">
+                Showing all {videos.length} loaded uploads
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

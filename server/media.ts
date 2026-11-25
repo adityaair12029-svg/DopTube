@@ -5,7 +5,9 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-export const DATA_DIR = path.resolve(process.cwd(), 'data');
+export const DATA_DIR = process.env.VERCEL
+  ? '/tmp/doptube-data'
+  : path.resolve(process.cwd(), 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 export const THUMB_DIR = path.join(DATA_DIR, 'thumbnails');
 export const MEDIA_DIR = path.join(DATA_DIR, 'media');
@@ -13,8 +15,12 @@ export const HLS_DIR = path.join(DATA_DIR, 'hls');
 
 export function ensureMediaDirs() {
   for (const dir of [DATA_DIR, UPLOAD_DIR, THUMB_DIR, MEDIA_DIR, HLS_DIR]) {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } catch {
+      // ignore if directory cannot be created in constrained environments
     }
   }
 }

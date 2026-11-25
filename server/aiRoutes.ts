@@ -12,7 +12,7 @@ import {
 } from './aiService.ts';
 import { rateLimit, requireAdmin, requireAuth, type AuthedRequest } from './auth.ts';
 import { db } from './db.ts';
-import { fetchExternalFeed, fetchExternalVideoById, type DiscoveryResult } from './discovery.ts';
+import { fetchExternalFeedPaged, fetchExternalVideoById, type DiscoveryResult } from './discovery.ts';
 import { filterAndSortVideos, INDIAN_LANGUAGES } from './domain.ts';
 import {
   buildConditionalSections,
@@ -34,25 +34,42 @@ export function registerAiAndLibraryRoutes(
   // =========================================================================
 
   const handleHomeFeed = async (req: AuthedRequest, res: Express['response'] | any) => {
-    const { category = 'All', language = 'All', shorts = '0' } = req.query as Record<string, string | undefined>;
+    const { category = 'All', language = 'All', shorts = '0', pageToken = '' } = req.query as Record<string, string | undefined>;
     const cursor = Math.max(0, Number(req.query.cursor || 0));
     const limit = Math.max(1, Math.min(30, Number(req.query.limit || 12)));
+    const cleanToken = (pageToken || '').trim();
 
     const ctx = buildUserAiContext(req.auth?.userId);
-    const native = getAllNativeCandidates().filter((v) => (shorts === '1' ? v.isShort : !v.isShort));
-    const filteredNative = filterAndSortVideos(native, { category, language });
+    const native =
+      cleanToken === ''
+        ? filterAndSortVideos(
+            getAllNativeCandidates().filter((v) => (shorts === '1' ? v.isShort : !v.isShort)),
+            { category, language }
+          )
+        : [];
 
-    const externalItems = await fetchExternalFeed({
+    const extPaged = await fetchExternalFeedPaged({
       category,
       language,
       shorts: shorts === '1',
+      pageToken: cleanToken,
     });
 
-    const pool: CandidateVideo[] = [...filteredNative, ...externalItems.map(toCandidate)];
+    const pool: CandidateVideo[] = [...native, ...extPaged.items.map(toCandidate)];
     const rec = generatePersonalizedRecommendations(pool, ctx, { cursor, limit });
 
+    let respNextCursor: number | null = rec.nextCursor;
+    let respNextPageToken: string = cleanToken;
+    let respHasMore = rec.hasMore;
+
+    if (rec.nextCursor === null && extPaged.nextPageToken) {
+      respNextCursor = 0;
+      respNextPageToken = extPaged.nextPageToken;
+      respHasMore = true;
+    }
+
     let sections: ReturnType<typeof buildConditionalSections> = [];
-    if (cursor === 0 && category === 'All' && language === 'All' && shorts !== '1') {
+    if (cursor === 0 && cleanToken === '' && category === 'All' && language === 'All' && shorts !== '1') {
       const continueWatchingRows = req.auth
         ? (db
             .prepare(`
@@ -61,7 +78,7 @@ export function registerAiAndLibraryRoutes(
               FROM watch_history wh
               JOIN videos v ON v.id = wh.video_id
               JOIN channels c ON c.id = v.channel_id
-              WHERE wh.user_id = ? AND wh.progress_sec > 10 AND v.visibility = 'public' AND v.status = 'published'
+              WHERE wh.user_id = ? AND wh.progress_sec > 10 AND v.visibility = 'public' AND v.status = 'published' AND v.is_short = 0
               ORDER BY wh.watched_at DESC LIMIT 8
             `)
             .all(req.auth.userId) as unknown as VideoDbRow[])
@@ -104,8 +121,9 @@ export function registerAiAndLibraryRoutes(
     res.json({
       videos: rec.items,
       sections,
-      nextCursor: rec.nextCursor,
-      hasMore: rec.hasMore,
+      nextCursor: respNextCursor,
+      nextPageToken: respNextPageToken || null,
+      hasMore: respHasMore,
       total: rec.total,
     });
   };
@@ -115,26 +133,42 @@ export function registerAiAndLibraryRoutes(
 
   app.get('/api/recommendations/trending', async (req: AuthedRequest, res) => {
     const language = String(req.query.language || 'All');
+    const pageToken = String(req.query.pageToken || '').trim();
     const ctx = buildUserAiContext(req.auth?.userId);
-    const native = filterAndSortVideos(
-      getAllNativeCandidates().filter((v) => !v.isShort),
-      { language }
-    );
-    const ext = await fetchExternalFeed({ trending: true, language, shorts: false });
-    const ranked = rankTrendingIndia([...native, ...ext.map(toCandidate)], ctx.validation);
-    res.json({ videos: ranked });
+    const native =
+      pageToken === ''
+        ? filterAndSortVideos(
+            getAllNativeCandidates().filter((v) => !v.isShort),
+            { language }
+          )
+        : [];
+    const extPaged = await fetchExternalFeedPaged({ trending: true, language, shorts: false, pageToken });
+    const ranked = rankTrendingIndia([...native, ...extPaged.items.map(toCandidate)], ctx.validation);
+    res.json({
+      videos: ranked,
+      nextPageToken: extPaged.nextPageToken,
+      hasMore: Boolean(extPaged.nextPageToken),
+    });
   });
 
   app.get('/api/recommendations/shorts', async (req: AuthedRequest, res) => {
     const language = String(req.query.language || 'All');
+    const pageToken = String(req.query.pageToken || '').trim();
     const ctx = buildUserAiContext(req.auth?.userId);
-    const native = filterAndSortVideos(
-      getAllNativeCandidates().filter((v) => v.isShort),
-      { language }
-    );
-    const ext = await fetchExternalFeed({ shorts: true, language });
-    const ranked = rankShortsFeed([...native, ...ext.map(toCandidate)], ctx);
-    res.json({ videos: ranked });
+    const native =
+      pageToken === ''
+        ? filterAndSortVideos(
+            getAllNativeCandidates().filter((v) => v.isShort),
+            { language }
+          )
+        : [];
+    const extPaged = await fetchExternalFeedPaged({ shorts: true, language, pageToken });
+    const ranked = rankShortsFeed([...native, ...extPaged.items.map(toCandidate)], ctx);
+    res.json({
+      videos: ranked,
+      nextPageToken: extPaged.nextPageToken,
+      hasMore: Boolean(extPaged.nextPageToken),
+    });
   });
 
   app.get('/api/recommendations/related/:videoId', async (req: AuthedRequest, res) => {

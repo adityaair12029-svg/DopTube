@@ -7,6 +7,7 @@ export interface ChannelSummary {
   bannerColor?: string;
   verified?: boolean;
   subscriberCount: number;
+  totalResults?: number;
   isSubscribed?: boolean;
   notifyAll?: number;
 }

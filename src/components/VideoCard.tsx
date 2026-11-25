@@ -12,6 +12,7 @@ import {
   Play,
   Radio,
   Share2,
+  Zap,
 } from 'lucide-react';
 import type { VideoItem } from '../types';
 import { formatDuration, formatRelativeTime, formatViews } from '../lib/format';
@@ -19,7 +20,7 @@ import { formatDuration, formatRelativeTime, formatViews } from '../lib/format';
 interface VideoCardProps {
   video: VideoItem;
   layout?: 'grid' | 'horizontal' | 'compact';
-  onWatch: (videoId: string) => void;
+  onWatch: (videoId: string, video?: VideoItem) => void;
   onOpenChannel: (channelId: string) => void;
   onSaveWatchLater: (videoId: string) => void;
   onSavePlaylist: (videoId: string) => void;
@@ -79,7 +80,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     >
       <button
         type="button"
-        onClick={() => onWatch(video.id)}
+        onClick={() => onWatch(video.id, video)}
         aria-label={`Watch ${video.title}`}
         className="w-full h-full block cursor-pointer"
       >
@@ -103,6 +104,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-[#cc0000] text-white text-[11px] font-semibold tracking-wide flex items-center gap-1 pointer-events-none">
           <Radio className="w-3 h-3" />
           LIVE
+        </span>
+      ) : video.isShort ? (
+        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-[#ff0033] text-white text-[10px] font-bold tracking-wider flex items-center gap-1 pointer-events-none shadow">
+          <Zap className="w-2.5 h-2.5 fill-white" />
+          SHORTS
         </span>
       ) : (
         <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/80 text-white text-[12px] font-medium font-mono-nums pointer-events-none">
@@ -257,7 +263,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <div className="flex-1 min-w-0">
           <button
             type="button"
-            onClick={() => onWatch(video.id)}
+            onClick={() => onWatch(video.id, video)}
             className="text-left text-[14px] font-semibold leading-snug text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 hover:text-[#ff0033] dark:hover:text-white cursor-pointer"
           >
             {video.title}
@@ -287,7 +293,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <div className="min-w-0 flex-1">
             <button
               type="button"
-              onClick={() => onWatch(video.id)}
+              onClick={() => onWatch(video.id, video)}
               className="text-left text-[18px] font-semibold leading-snug text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 cursor-pointer"
             >
               {video.title}
@@ -341,7 +347,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <div className="flex-1 min-w-0">
           <button
             type="button"
-            onClick={() => onWatch(video.id)}
+            onClick={() => onWatch(video.id, video)}
             className="text-left text-[15px] sm:text-[16px] font-semibold leading-[1.35] text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 cursor-pointer"
           >
             {video.title}

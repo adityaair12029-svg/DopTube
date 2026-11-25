@@ -1,5 +1,5 @@
-import React from 'react';
-import { CheckCircle2, SlidersHorizontal } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { CheckCircle2, Loader2, SlidersHorizontal } from 'lucide-react';
 import type { ChannelSummary, VideoItem } from '../types';
 import { formatViews, INDIAN_LANGUAGES } from '../lib/format';
 import { VideoCard } from '../components/VideoCard';
@@ -9,13 +9,16 @@ interface SearchViewProps {
   videos: VideoItem[];
   channels: ChannelSummary[];
   loading: boolean;
+  loadingMore?: boolean;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
   sort: 'relevance' | 'date' | 'views';
   duration: 'all' | 'short' | 'medium' | 'long';
   language: string;
   onChangeSort: (s: 'relevance' | 'date' | 'views') => void;
   onChangeDuration: (d: 'all' | 'short' | 'medium' | 'long') => void;
   onChangeLanguage: (l: string) => void;
-  onWatch: (videoId: string) => void;
+  onWatch: (videoId: string, video?: VideoItem) => void;
   onOpenChannel: (channelId: string) => void;
   onSaveWatchLater: (videoId: string) => void;
   onSavePlaylist: (videoId: string) => void;
@@ -28,6 +31,9 @@ export const SearchView: React.FC<SearchViewProps> = ({
   videos,
   channels,
   loading,
+  loadingMore = false,
+  hasMore = false,
+  onLoadMore,
   sort,
   duration,
   language,
@@ -41,6 +47,24 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onShare,
   onReport,
 }) => {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!onLoadMore || !hasMore || loadingMore || loading) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          onLoadMore();
+        }
+      },
+      { rootMargin: '250px' }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasMore, loadingMore, loading, onLoadMore]);
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 pb-20">
       {/* Search Filters Bar */}
@@ -133,7 +157,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
         </div>
       )}
 
-      {/* Search Result Video List (Horizontal layout matching screenshot) */}
+      {/* Search Result Video List */}
       {loading ? (
         <div className="space-y-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -155,21 +179,35 @@ export const SearchView: React.FC<SearchViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="space-y-5">
-          {videos.map((v) => (
-            <VideoCard
-              key={v.id}
-              video={v}
-              layout="horizontal"
-              onWatch={onWatch}
-              onOpenChannel={onOpenChannel}
-              onSaveWatchLater={onSaveWatchLater}
-              onSavePlaylist={onSavePlaylist}
-              onShare={onShare}
-              onReport={onReport}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-5">
+            {videos.map((v) => (
+              <VideoCard
+                key={v.id}
+                video={v}
+                layout="horizontal"
+                onWatch={onWatch}
+                onOpenChannel={onOpenChannel}
+                onSaveWatchLater={onSaveWatchLater}
+                onSavePlaylist={onSavePlaylist}
+                onShare={onShare}
+                onReport={onReport}
+              />
+            ))}
+          </div>
+
+          <div ref={sentinelRef} className="mt-8 flex flex-col items-center justify-center py-4">
+            {loadingMore && (
+              <div className="flex items-center gap-2 text-sm text-[#606060] dark:text-[#aaaaaa]">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Loading more results...</span>
+              </div>
+            )}
+            {!hasMore && videos.length > 0 && (
+              <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">End of search results</p>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

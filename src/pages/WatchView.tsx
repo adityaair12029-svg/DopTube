@@ -30,7 +30,8 @@ interface WatchViewProps {
   onToggleAutoplay: () => void;
   onChangeAutoplayMode: (mode: 'recommended' | 'playlist' | 'queue' | 'repeat') => void;
   onQueueChanged: () => void;
-  onWatch: (videoId: string) => void;
+  onWatch: (videoId: string, video?: VideoItem) => void;
+  onRedirectToShort?: (video: VideoItem) => void;
   onOpenChannel: (channelId: string) => void;
   onOpenAuth: () => void;
   onSavePlaylist: (videoId: string) => void;
@@ -52,6 +53,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
   onChangeAutoplayMode,
   onQueueChanged,
   onWatch,
+  onRedirectToShort,
   onOpenChannel,
   onOpenAuth,
   onSavePlaylist,
@@ -93,6 +95,10 @@ export const WatchView: React.FC<WatchViewProps> = ({
     ])
       .then(([vRes, cRes, recRelated]) => {
         if (cancelled) return;
+        if (vRes.video?.isShort && onRedirectToShort) {
+          onRedirectToShort(vRes.video);
+          return;
+        }
         setVideo(vRes.video);
         setRelated(recRelated.videos.length > 0 ? recRelated.videos : vRes.related);
         setComments(cRes.comments);
@@ -115,15 +121,15 @@ export const WatchView: React.FC<WatchViewProps> = ({
       }
       cancelled = true;
     };
-  }, [videoId]);
+  }, [videoId, onRedirectToShort]);
 
   // Countdown tick for Next Video Autoplay
   useEffect(() => {
     if (!nextUp) return;
     if (nextUp.countdown <= 0) {
-      const targetId = nextUp.video.id;
+      const targetVideo = nextUp.video;
       setNextUp(null);
-      onWatch(targetId);
+      onWatch(targetVideo.id, targetVideo);
       return;
     }
     const timer = setTimeout(() => {
@@ -296,9 +302,18 @@ export const WatchView: React.FC<WatchViewProps> = ({
 
   if (!video) {
     return (
-      <div className="py-20 text-center">
+      <div className="py-20 text-center px-4">
         <p className="text-lg font-semibold">Video unavailable</p>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-1">This video may have been removed or set to private.</p>
+        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-1">
+          This video may have been removed, set to private, or temporarily failed to load.
+        </p>
+        <button
+          type="button"
+          onClick={() => onWatch(videoId)}
+          className="mt-4 h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-xs font-semibold cursor-pointer"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -351,9 +366,9 @@ export const WatchView: React.FC<WatchViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const id = nextUp.video.id;
+                  const target = nextUp.video;
                   setNextUp(null);
-                  onWatch(id);
+                  onWatch(target.id, target);
                 }}
                 className="h-8 px-4 rounded-full bg-white text-[#0f0f0f] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
@@ -727,7 +742,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                   <div key={qv.id} className="flex items-center gap-2 text-xs">
                     <button
                       type="button"
-                      onClick={() => onWatch(qv.id)}
+                      onClick={() => onWatch(qv.id, qv)}
                       className="flex-1 min-w-0 flex items-center gap-2 text-left hover:underline cursor-pointer"
                     >
                       <img

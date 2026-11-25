@@ -111,7 +111,18 @@ interface RawChannelItem {
   };
   statistics?: {
     subscriberCount?: string;
+    videoCount?: string;
   };
+  contentDetails?: {
+    relatedPlaylists?: {
+      uploads?: string;
+    };
+  };
+}
+
+export interface PagedDiscoveryResult {
+  items: DiscoveryResult[];
+  nextPageToken: string | null;
 }
 
 const CATEGORY_ID_MAP: Record<string, string> = {
@@ -148,7 +159,7 @@ function mapLanguageCode(code?: string, fallback = 'Hindi'): string {
 
 async function fetchChannelsMap(channelIds: string[], apiKey: string): Promise<Map<string, RawChannelItem>> {
   const result = new Map<string, RawChannelItem>();
-  const unique = Array.from(new Set(channelIds.filter(Boolean))).slice(0, 25);
+  const unique = Array.from(new Set(channelIds.filter(Boolean))).slice(0, 50);
   if (unique.length === 0) return result;
 
   const missing: string[] = [];
@@ -161,8 +172,8 @@ async function fetchChannelsMap(channelIds: string[], apiKey: string): Promise<M
   if (missing.length === 0) return result;
 
   try {
-    const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(missing.join(','))}&key=${encodeURIComponent(apiKey)}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${encodeURIComponent(missing.join(','))}&key=${encodeURIComponent(apiKey)}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
     if (!resp.ok) return result;
     const json = (await resp.json()) as { items?: RawChannelItem[] };
     for (const ch of json.items ?? []) {
@@ -252,8 +263,8 @@ function toDiscoveryResult(
     hlsUrl: null,
     sourceType: 'external',
     externalEmbedUrl: isShort
-      ? `https://www.youtube.com/embed/${vid}?autoplay=1&loop=1&playlist=${vid}&rel=0`
-      : `https://www.youtube.com/embed/${vid}?autoplay=1&rel=0`,
+      ? `https://www.youtube.com/embed/${vid}?autoplay=1&playsinline=1&loop=1&playlist=${vid}&rel=0&modestbranding=1`
+      : `https://www.youtube.com/embed/${vid}?autoplay=1&playsinline=1&rel=0&modestbranding=1`,
   };
 }
 
@@ -262,12 +273,12 @@ async function enrichVideoIds(
   apiKey: string,
   opts?: { category?: string; language?: string; forceShort?: boolean }
 ): Promise<DiscoveryResult[]> {
-  const uniqueIds = Array.from(new Set(videoIds.filter(Boolean))).slice(0, 24);
+  const uniqueIds = Array.from(new Set(videoIds.filter(Boolean))).slice(0, 50);
   if (uniqueIds.length === 0) return [];
 
   try {
     const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&id=${encodeURIComponent(uniqueIds.join(','))}&key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(7000) });
     if (!response.ok) {
       console.warn(`External discovery videos API responded with ${response.status}`);
       return [];
@@ -294,48 +305,57 @@ async function enrichVideoIds(
   }
 }
 
-export async function fetchExternalFeed(params: {
+export async function fetchExternalFeedPaged(params: {
   category?: string;
   language?: string;
   trending?: boolean;
   shorts?: boolean;
-}): Promise<DiscoveryResult[]> {
+  pageToken?: string;
+}): Promise<PagedDiscoveryResult> {
   const apiKey = getExternalApiKey();
-  if (!apiKey) return [];
+  if (!apiKey) return { items: [], nextPageToken: null };
 
   const category = params.category || 'All';
   const language = params.language || 'All';
-  const cacheKey = `feed:${category}:${language}:${Boolean(params.trending)}:${Boolean(params.shorts)}`;
-  const cached = getCached<DiscoveryResult[]>(cacheKey);
+  const pageToken = (params.pageToken || '').trim();
+  const cacheKey = `feed_paged:${category}:${language}:${Boolean(params.trending)}:${Boolean(params.shorts)}:${pageToken}`;
+  const cached = getCached<PagedDiscoveryResult>(cacheKey);
   if (cached) return cached;
 
   try {
+    const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+
     if (params.shorts) {
       const q = encodeURIComponent(
         `India ${language !== 'All' ? language : ''} ${category !== 'All' ? category : ''} #shorts`.trim()
       );
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=short&regionCode=IN&maxResults=12&q=${q}&key=${encodeURIComponent(apiKey)}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=short&regionCode=IN&maxResults=20${tokenParam}&q=${q}&key=${encodeURIComponent(apiKey)}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6500) });
       if (!resp.ok) {
         console.warn(`External discovery shorts API responded with ${resp.status}`);
-        return [];
+        return { items: [], nextPageToken: null };
       }
-      const data = (await resp.json()) as { items?: RawVideoItem[] };
+      const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
       const ids = (data.items ?? [])
         .map((it) => (typeof it.id === 'string' ? it.id : it.id?.videoId || ''))
         .filter(Boolean);
       const enriched = await enrichVideoIds(ids, apiKey, { category, language, forceShort: true });
-      return setCached(cacheKey, enriched);
+      const payload: PagedDiscoveryResult = {
+        items: enriched,
+        nextPageToken: data.nextPageToken || null,
+      };
+      if (payload.items.length > 0) setCached(cacheKey, payload);
+      return payload;
     }
 
     if (category === 'All' && language === 'All') {
-      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&chart=mostPopular&regionCode=IN&maxResults=24&key=${encodeURIComponent(apiKey)}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&chart=mostPopular&regionCode=IN&maxResults=24${tokenParam}&key=${encodeURIComponent(apiKey)}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6500) });
       if (!resp.ok) {
         console.warn(`External discovery chart API responded with ${resp.status}`);
-        return [];
+        return { items: [], nextPageToken: null };
       }
-      const data = (await resp.json()) as { items?: RawVideoItem[] };
+      const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
       const items = (data.items ?? []).filter((i) => i.status?.embeddable !== false);
       const chMap = await fetchChannelsMap(
         items.map((i) => i.snippet?.channelId || '').filter(Boolean),
@@ -345,7 +365,12 @@ export async function fetchExternalFeed(params: {
         .map((it) => toDiscoveryResult(it, chMap))
         .filter((v): v is DiscoveryResult => Boolean(v && !v.isShort));
       for (const v of converted) setCached(`vid:${v.id}`, v);
-      return setCached(cacheKey, converted);
+      const payload: PagedDiscoveryResult = {
+        items: converted,
+        nextPageToken: data.nextPageToken || null,
+      };
+      if (payload.items.length > 0) setCached(cacheKey, payload);
+      return payload;
     }
 
     const mappedQueryCat = category === 'Mixes' ? 'Indian Music Mixes' : category;
@@ -357,51 +382,79 @@ export async function fetchExternalFeed(params: {
       .filter(Boolean)
       .join(' ');
     const eventTypeParam = category === 'Live' ? '&eventType=live' : '';
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=16${eventTypeParam}&q=${encodeURIComponent(searchQuery)}&key=${encodeURIComponent(apiKey)}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=24${eventTypeParam}${tokenParam}&q=${encodeURIComponent(searchQuery)}&key=${encodeURIComponent(apiKey)}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6500) });
     if (!resp.ok) {
       console.warn(`External discovery category search responded with ${resp.status}`);
-      return [];
+      return { items: [], nextPageToken: null };
     }
-    const data = (await resp.json()) as { items?: RawVideoItem[] };
+    const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
     const ids = (data.items ?? [])
       .map((it) => (typeof it.id === 'string' ? it.id : it.id?.videoId || ''))
       .filter(Boolean);
     const enriched = await enrichVideoIds(ids, apiKey, { category, language });
-    return setCached(
-      cacheKey,
-      enriched.filter((v) => !v.isShort)
-    );
+    const payload: PagedDiscoveryResult = {
+      items: enriched.filter((v) => !v.isShort),
+      nextPageToken: data.nextPageToken || null,
+    };
+    if (payload.items.length > 0) setCached(cacheKey, payload);
+    return payload;
   } catch (err) {
     console.warn('External feed fetch failed:', err instanceof Error ? err.message : 'unknown');
-    return [];
+    return { items: [], nextPageToken: null };
   }
 }
 
-export async function fetchExternalDiscovery(query: string, language?: string): Promise<DiscoveryResult[]> {
+export async function fetchExternalFeed(params: {
+  category?: string;
+  language?: string;
+  trending?: boolean;
+  shorts?: boolean;
+}): Promise<DiscoveryResult[]> {
+  const res = await fetchExternalFeedPaged(params);
+  return res.items;
+}
+
+export async function fetchExternalDiscoveryPaged(
+  query: string,
+  language?: string,
+  pageToken = ''
+): Promise<PagedDiscoveryResult> {
   const apiKey = getExternalApiKey();
   if (!apiKey || !query.trim()) {
-    return [];
+    return { items: [], nextPageToken: null };
   }
 
-  const cacheKey = `search:${query.trim().toLowerCase()}:${language || 'All'}`;
-  const cached = getCached<DiscoveryResult[]>(cacheKey);
+  const cleanToken = pageToken.trim();
+  const cacheKey = `search_paged:${query.trim().toLowerCase()}:${language || 'All'}:${cleanToken}`;
+  const cached = getCached<PagedDiscoveryResult>(cacheKey);
   if (cached) return cached;
 
   try {
     const q = encodeURIComponent(language && language !== 'All' ? `${query} ${language}` : query);
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=16&q=${q}&key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!response.ok) return [];
-    const data = (await response.json()) as { items?: RawVideoItem[] };
+    const tokenParam = cleanToken ? `&pageToken=${encodeURIComponent(cleanToken)}` : '';
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=24${tokenParam}&q=${q}&key=${encodeURIComponent(apiKey)}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(6500) });
+    if (!response.ok) return { items: [], nextPageToken: null };
+    const data = (await response.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
     const ids = (data.items ?? [])
       .map((it) => (typeof it.id === 'string' ? it.id : it.id?.videoId || ''))
       .filter(Boolean);
     const enriched = await enrichVideoIds(ids, apiKey, { language });
-    return setCached(cacheKey, enriched);
+    const payload: PagedDiscoveryResult = {
+      items: enriched,
+      nextPageToken: data.nextPageToken || null,
+    };
+    if (payload.items.length > 0) setCached(cacheKey, payload);
+    return payload;
   } catch {
-    return [];
+    return { items: [], nextPageToken: null };
   }
+}
+
+export async function fetchExternalDiscovery(query: string, language?: string): Promise<DiscoveryResult[]> {
+  const res = await fetchExternalDiscoveryPaged(query, language);
+  return res.items;
 }
 
 export async function fetchExternalVideoById(
@@ -425,24 +478,49 @@ export async function fetchExternalVideoById(
   if (!related) {
     const topicWords = video.title.split(/\s+/).slice(0, 4).join(' ');
     const found = await fetchExternalDiscovery(topicWords || video.category, video.language);
-    related = found.filter((r) => r.id !== video!.id).slice(0, 10);
+    related = found.filter((r) => r.id !== video!.id && !r.isShort).slice(0, 14);
     setCached(relKey, related);
   }
 
   return { video, related };
 }
 
+interface RawPlaylistItem {
+  contentDetails?: {
+    videoId?: string;
+  };
+  snippet?: {
+    resourceId?: {
+      videoId?: string;
+    };
+  };
+}
+
 export async function fetchExternalChannelById(
-  extChannelId: string
-): Promise<{ channel: DiscoveryChannelDetail; videos: DiscoveryResult[] } | null> {
+  extChannelId: string,
+  pageToken = ''
+): Promise<{
+  channel: DiscoveryChannelDetail;
+  videos: DiscoveryResult[];
+  nextPageToken: string | null;
+  hasMore: boolean;
+  totalResults: number;
+} | null> {
   const apiKey = getExternalApiKey();
   if (!apiKey) return null;
 
   const rawChannelId = extChannelId.startsWith('ext_ch_') ? extChannelId.slice(7) : extChannelId;
   if (!rawChannelId) return null;
 
-  const cacheKey = `channel_page:${rawChannelId}`;
-  const cached = getCached<{ channel: DiscoveryChannelDetail; videos: DiscoveryResult[] }>(cacheKey);
+  const cleanToken = pageToken.trim();
+  const cacheKey = `channel_page:${rawChannelId}:${cleanToken}`;
+  const cached = getCached<{
+    channel: DiscoveryChannelDetail;
+    videos: DiscoveryResult[];
+    nextPageToken: string | null;
+    hasMore: boolean;
+    totalResults: number;
+  }>(cacheKey);
   if (cached) return cached;
 
   try {
@@ -450,12 +528,47 @@ export async function fetchExternalChannelById(
     const ch = chMap.get(rawChannelId);
     if (!ch) return null;
 
-    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&channelId=${encodeURIComponent(rawChannelId)}&maxResults=12&key=${encodeURIComponent(apiKey)}`;
-    const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(6000) });
-    const data = resp.ok ? ((await resp.json()) as { items?: RawVideoItem[] }) : { items: [] };
-    const ids = (data.items ?? [])
-      .map((it) => (typeof it.id === 'string' ? it.id : it.id?.videoId || ''))
-      .filter(Boolean);
+    const uploadsPlaylistId = ch.contentDetails?.relatedPlaylists?.uploads;
+    const tokenParam = cleanToken ? `&pageToken=${encodeURIComponent(cleanToken)}` : '';
+
+    let ids: string[] = [];
+    let nextPageToken: string | null = null;
+    let totalResults = Number(ch.statistics?.videoCount || 0);
+
+    if (uploadsPlaylistId) {
+      const playlistUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${encodeURIComponent(uploadsPlaylistId)}&maxResults=50${tokenParam}&key=${encodeURIComponent(apiKey)}`;
+      const plResp = await fetch(playlistUrl, { signal: AbortSignal.timeout(7000) });
+      if (plResp.ok) {
+        const plData = (await plResp.json()) as {
+          items?: RawPlaylistItem[];
+          nextPageToken?: string;
+          pageInfo?: { totalResults?: number };
+        };
+        ids = (plData.items ?? [])
+          .map((it) => it.contentDetails?.videoId || it.snippet?.resourceId?.videoId || '')
+          .filter(Boolean);
+        nextPageToken = plData.nextPageToken || null;
+        if (plData.pageInfo?.totalResults) {
+          totalResults = plData.pageInfo.totalResults;
+        }
+      }
+    }
+
+    if (ids.length === 0 && !uploadsPlaylistId) {
+      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&channelId=${encodeURIComponent(rawChannelId)}&maxResults=50${tokenParam}&key=${encodeURIComponent(apiKey)}`;
+      const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(6500) });
+      const data = resp.ok
+        ? ((await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string; pageInfo?: { totalResults?: number } })
+        : { items: [] };
+      ids = (data.items ?? [])
+        .map((it) => (typeof it.id === 'string' ? it.id : it.id?.videoId || ''))
+        .filter(Boolean);
+      nextPageToken = data.nextPageToken || null;
+      if (data.pageInfo?.totalResults) {
+        totalResults = data.pageInfo.totalResults;
+      }
+    }
+
     const videos = await enrichVideoIds(ids, apiKey);
 
     const subscriberCount = Number(ch.statistics?.subscriberCount || 0);
@@ -481,7 +594,14 @@ export async function fetchExternalChannelById(
       createdAt: ch.snippet?.publishedAt || new Date().toISOString(),
     };
 
-    return setCached(cacheKey, { channel: detail, videos });
+    const payload = {
+      channel: detail,
+      videos,
+      nextPageToken,
+      hasMore: Boolean(nextPageToken),
+      totalResults: Math.max(totalResults, videos.length),
+    };
+    return setCached(cacheKey, payload);
   } catch {
     return null;
   }

@@ -188,21 +188,13 @@ export const SettingsView: React.FC<{
             <div className="flex items-center justify-between gap-4 pt-3 border-t border-neutral-200 dark:border-[#272727]">
               <div>
                 <p className="text-sm font-medium">Infinite Scroll Feed</p>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Automatically load more recommended videos while scrolling</p>
+                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">
+                  Automatically loads continuous videos across Home, Shorts, Search, and Channel pages
+                </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={prefs.infiniteScrollEnabled}
-                onClick={() => patchPref({ infiniteScrollEnabled: !prefs.infiniteScrollEnabled })}
-                className={`h-8 px-4 rounded-full text-xs font-semibold cursor-pointer ${
-                  prefs.infiniteScrollEnabled
-                    ? 'bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f]'
-                    : 'bg-neutral-100 dark:bg-[#272727]'
-                }`}
-              >
-                {prefs.infiniteScrollEnabled ? 'Enabled' : 'Manual load'}
-              </button>
+              <span className="h-8 px-4 rounded-full text-xs font-semibold bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] inline-flex items-center">
+                Always On
+              </span>
             </div>
 
             <div className="flex items-center justify-between gap-4 pt-3 border-t border-neutral-200 dark:border-[#272727]">
