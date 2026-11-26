@@ -4,7 +4,7 @@
   "functions": {
     "api/*.js": {
       "maxDuration": 30,
-      "includeFiles": "{firebase-applet-config.json,api/_app.mjs}"
+      "includeFiles": "{firebase-applet-config.json,api/_app.mjs,node_modules/sql.js/dist/**}"
     }
   },
   "rewrites": [

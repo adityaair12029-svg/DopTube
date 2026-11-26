@@ -18,8 +18,8 @@ import {
   buildUsernameSuggestions,
   type RankableVideo,
 } from './domain';
-import { computeViewsLast30Days, scoreCandidate, type CandidateVideo, type UserAiContext } from './recommendation';
-import { buildPersonalizedDiscoveryQuery } from './discovery';
+import { computeViewsLast30Days, diversifyFeed, scoreCandidate, type CandidateVideo, type UserAiContext } from './recommendation';
+import { buildPersonalizedDiscoveryQuery, mapDailymotionItem, parseAtomRssFeed } from './discovery';
 import { createSqlJsCompatDatabase } from './db';
 
 test('password hashing and verification round-trip', () => {
@@ -248,26 +248,114 @@ test('computeViewsLast30Days returns 30 ordered points combining events, watch h
   assert.equal(nov20?.views, 10);
 });
 
-test('buildPersonalizedDiscoveryQuery adapts queries using user interests, searches, and language', () => {
-  const homeQ = buildPersonalizedDiscoveryQuery({
+test('buildPersonalizedDiscoveryQuery adapts queries without locking Shorts onto a single search term', () => {
+  const homeInitial = buildPersonalizedDiscoveryQuery({
     interestTopics: ['Physics', 'Space'],
-    recentSearches: ['quantum mechanics'],
+    recentSearches: ['samay raina'],
     preferredLanguage: 'Hindi',
     shorts: false,
     seed: 0,
   });
-  assert.ok(homeQ.toLowerCase().includes('quantum mechanics'));
-  assert.ok(homeQ.toLowerCase().includes('hindi'));
+  assert.ok(homeInitial.toLowerCase().includes('physics'));
+  assert.equal(homeInitial.toLowerCase().includes('samay raina'), false);
+
+  const homeRotated = buildPersonalizedDiscoveryQuery({
+    interestTopics: ['Physics', 'Space'],
+    recentSearches: ['quantum mechanics'],
+    preferredLanguage: 'Hindi',
+    shorts: false,
+    seed: 1,
+  });
+  assert.ok(homeRotated.toLowerCase().includes('quantum mechanics'));
+  assert.ok(homeRotated.toLowerCase().includes('hindi'));
 
   const shortsQ = buildPersonalizedDiscoveryQuery({
     interestTopics: ['Cricket'],
+    recentSearches: ['samay raina'],
     preferredLanguage: 'Tamil',
     shorts: true,
     seed: 1,
   });
   assert.ok(shortsQ.toLowerCase().includes('shorts'));
   assert.ok(shortsQ.toLowerCase().includes('cricket'));
-  assert.ok(shortsQ.toLowerCase().includes('tamil'));
+  assert.equal(shortsQ.toLowerCase().includes('samay raina'), false);
+});
+
+test('mapDailymotionItem converts Dailymotion metadata into dm_ playable discovery item', () => {
+  const mapped = mapDailymotionItem({
+    id: 'x9abc12',
+    title: 'Samay Raina Standup Clip #shorts',
+    description: 'Comedy special clip in Hindi',
+    thumbnail_720_url: 'https://s1.dmcdn.net/v/test/720.jpg',
+    duration: 48,
+    views_total: 120000,
+    likes_total: 5400,
+    created_time: 1764000000,
+    language: 'hi',
+    channel: 'fun',
+    'owner.username': 'ComedyClubIN',
+    'owner.screenname': 'Comedy Club India',
+    tags: ['comedy', 'shorts'],
+  });
+  assert.ok(mapped);
+  assert.equal(mapped.id, 'dm_x9abc12');
+  assert.equal(mapped.channelId, 'dm_ch_ComedyClubIN');
+  assert.equal(mapped.isShort, true);
+  assert.equal(mapped.category, 'Comedy');
+  assert.equal(mapped.language, 'Hindi');
+  assert.equal(mapped.externalEmbedUrl, 'https://www.dailymotion.com/embed/video/x9abc12?autoplay=1');
+});
+
+test('parseAtomRssFeed parses YouTube Atom XML entries and detects Shorts links', () => {
+  const sampleXml = `<?xml version="1.0" encoding="UTF-8"?>
+  <feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/">
+    <entry>
+      <yt:videoId>abcShort123</yt:videoId>
+      <yt:channelId>UC_test1</yt:channelId>
+      <title>Quick Cricket Yorker &amp; Swing Tip</title>
+      <link rel="alternate" href="https://www.youtube.com/shorts/abcShort123"/>
+      <author><name>Cricket Lab India</name></author>
+      <published>2026-11-25T08:00:00+00:00</published>
+      <media:group>
+        <media:thumbnail url="https://i1.ytimg.com/vi/abcShort123/hqdefault.jpg"/>
+        <media:description>Fast bowling tip</media:description>
+        <media:community>
+          <media:starRating count="2400"/>
+          <media:statistics views="85000"/>
+        </media:community>
+      </media:group>
+    </entry>
+  </feed>`;
+  const items = parseAtomRssFeed(sampleXml, {
+    channelId: 'UC_test1',
+    category: 'Cricket',
+    language: 'Hindi',
+  });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'ext_abcShort123');
+  assert.equal(items[0].isShort, true);
+  assert.equal(items[0].views, 85000);
+  assert.equal(items[0].title, 'Quick Cricket Yorker & Swing Tip');
+});
+
+test('diversifyFeed caps single-creator flooding and duplicate reuploads in top window', () => {
+  const candidates = [
+    { id: '1', channelId: 'ch_spam', category: 'Comedy', title: 'Samay Raina Best Comedy Moments' },
+    { id: '2', channelId: 'ch_spam', category: 'Comedy', title: 'Samay Raina Funny Clip Part 2' },
+    { id: '3', channelId: 'ch_spam', category: 'Comedy', title: 'Samay Raina Live Stream Highlights' },
+    { id: '4', channelId: 'ch_mirror', category: 'Comedy', title: 'Samay Raina Best Comedy Moments Reupload' },
+    { id: '5', channelId: 'ch_tech', category: 'Technology', title: 'AI Smartphone Review India' },
+    { id: '6', channelId: 'ch_science', category: 'Science', title: 'ISRO Next Lunar Mission Explained' },
+    { id: '7', channelId: 'ch_cricket', category: 'Cricket', title: 'Bumrah Yorkers Compilation' },
+  ];
+  const diverse = diversifyFeed(candidates, 1, 2, 2, 15);
+  const top5Creators = diverse.slice(0, 5).map((v) => v.channelId);
+  assert.equal(top5Creators.filter((c) => c === 'ch_spam').length <= 2, true);
+  assert.notEqual(diverse[0].channelId, diverse[1].channelId);
+  // Ensure normalized duplicate title was pushed back behind unique topics
+  const techIndex = diverse.findIndex((v) => v.id === '5');
+  const dupIndex = diverse.findIndex((v) => v.id === '4');
+  assert.ok(techIndex < dupIndex);
 });
 
 test('scoreCandidate demotes unrelated low-view native uploads from other creators', () => {

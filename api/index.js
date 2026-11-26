@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   try {
     await ensureServerReady();
     if (req.url && req.url.includes('__vercel_path=')) {
-      const parsed = new URL(req.url, 'https://doobtube.vercel.app');
+      const parsed = new URL(req.url, 'https://doptube.vercel.app');
       const vpath = parsed.searchParams.get('__vercel_path') || '';
       parsed.searchParams.delete('__vercel_path');
       const qs = parsed.searchParams.toString();

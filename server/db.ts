@@ -432,27 +432,16 @@ function normalizeSqlParams(params: unknown[]): Array<string | number | null | U
 }
 
 export async function createSqlJsCompatDatabase(snapshotPath?: string): Promise<CompatDatabase> {
-  const req = createRequire(import.meta.url);
-  const initMod = req('sql.js/dist/sql-asm.js') as
-    | ((opts?: Record<string, unknown>) => Promise<{
-        Database: new (data?: ArrayLike<number> | Buffer | null) => {
-          run: (sql: string, params?: unknown[]) => unknown;
-          exec: (sql: string) => unknown[];
-          prepare: (sql: string) => {
-            bind: (params?: unknown[]) => boolean;
-            step: () => boolean;
-            getAsObject: () => Record<string, unknown>;
-            free: () => void;
-          };
-          getRowsModified: () => number;
-          export: () => Uint8Array;
-        };
-      }>)
-    | { default?: unknown };
+  // Static dynamic-import specifier ensures Vercel @vercel/node traces sql.js/dist/sql-asm.js
+  let initMod: unknown;
+  try {
+    initMod = await import('sql.js/dist/sql-asm.js');
+  } catch {
+    const req = createRequire(import.meta.url);
+    initMod = req('sql.js/dist/sql-asm.js');
+  }
 
-  const initFn = (typeof initMod === 'function' ? initMod : initMod.default) as (
-    opts?: Record<string, unknown>
-  ) => Promise<{
+  type SqlJsModule = {
     Database: new (data?: ArrayLike<number> | Buffer | null) => {
       run: (sql: string, params?: unknown[]) => unknown;
       exec: (sql: string) => unknown[];
@@ -465,7 +454,20 @@ export async function createSqlJsCompatDatabase(snapshotPath?: string): Promise<
       getRowsModified: () => number;
       export: () => Uint8Array;
     };
-  }>;
+  };
+
+  type SqlJsInitFn = (opts?: Record<string, unknown>) => Promise<SqlJsModule>;
+  const resolved = initMod as { default?: unknown } | SqlJsInitFn;
+  const candidate = typeof resolved === 'function' ? resolved : resolved?.default;
+  const initFn = (
+    typeof candidate === 'function'
+      ? candidate
+      : (candidate as { default?: unknown } | undefined)?.default
+  ) as SqlJsInitFn;
+
+  if (typeof initFn !== 'function') {
+    throw new Error('Failed to resolve sql.js asm initializer.');
+  }
 
   const SQL = await initFn();
   let initialBytes: Uint8Array | undefined;

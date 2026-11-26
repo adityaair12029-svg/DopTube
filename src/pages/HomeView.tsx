@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { AlertCircle, Loader2, MoreVertical, Upload, Zap } from 'lucide-react';
+import { AlertCircle, Clock, Loader2, MoreVertical, Play, Sparkles, Upload, Zap } from 'lucide-react';
 import type { DiscoveryStatus, HomepageSection, UserProfile, VideoItem } from '../types';
 import { formatViews } from '../lib/format';
 import { CategoryBar } from '../components/CategoryBar';
@@ -115,14 +115,45 @@ export const HomeView: React.FC<HomeViewProps> = ({
     onDontRecommendCreator,
   };
 
-  const topRow = videos.slice(0, 4);
-  const restVideos = videos.slice(4);
   const isFiltered = selectedCategory !== 'All' || selectedLanguage !== 'All';
-  const showDiscoveryNotice =
-    discoveryStatus && (!discoveryStatus.configured || Boolean(discoveryStatus.issue));
+  const featuredHero = homeFeedTab === 'for_you' && !isFiltered && videos.length > 5 ? videos[0] : null;
+  const gridVideos = featuredHero ? videos.slice(1) : videos;
+  const topRow = gridVideos.slice(0, 4);
+  const restVideos = gridVideos.slice(4);
+  const showEmptyIssue =
+    videos.length === 0 && shorts.length === 0 && discoveryStatus && Boolean(discoveryStatus.issue);
 
   return (
     <div className="sm:px-6 pb-24 md:pb-12">
+      {/* JioHotstar Dual-Pill Brand Switcher (DopTube + TADKA Shorts) */}
+      <div className="px-3 sm:px-0 pt-3 pb-2 grid grid-cols-2 gap-3 max-w-2xl">
+        <button
+          type="button"
+          onClick={() => onChangeHomeFeedTab('for_you')}
+          aria-label="DopTube main feed"
+          className="p-[1.5px] rounded-2xl bg-gradient-to-r from-[#2563eb] via-[#7c3aed] to-[#ec4899] shadow-[0_6px_22px_rgba(37,99,235,0.22)] cursor-pointer transition-transform active:scale-[0.98]"
+        >
+          <span className="h-11 px-4 rounded-[14px] bg-[#071029] text-white flex items-center justify-center gap-2 font-bold text-[15px] tracking-tight">
+            <Sparkles className="w-4 h-4 text-[#e2e8f0] fill-current" />
+            <span>DopTube</span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            const firstShort = shorts[0];
+            if (firstShort) onOpenShort(firstShort.id, firstShort);
+            else onOpenShort('1');
+          }}
+          aria-label="Open TADKA Shorts feed"
+          className="h-[47px] px-4 rounded-2xl bg-gradient-to-r from-[#e11d48] via-[#f43f5e] to-[#f59e0b] text-white flex items-center justify-center gap-2 font-black tracking-wide text-[15px] shadow-[0_6px_22px_rgba(244,63,94,0.28)] hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer"
+        >
+          <Sparkles className="w-4 h-4 text-white fill-current" />
+          <span>TADKA</span>
+        </button>
+      </div>
+
       {/* X/Twitter Style Top Timeline Tabs (For you / Following) with JioHotstar underline */}
       <div
         role="tablist"
@@ -170,17 +201,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
             onSelectCategory={onSelectCategory}
             onSelectLanguage={onSelectLanguage}
           />
-        </div>
-      )}
-
-      {/* Honest Server Discovery Diagnostics Banner */}
-      {showDiscoveryNotice && videos.length > 0 && (
-        <div className="mx-3 sm:mx-0 mt-3 p-3 rounded-xl border border-[#e5e7eb] dark:border-[#2f3336] bg-[#eff3f4]/60 dark:bg-[#16181c] flex items-start gap-2.5 text-xs text-[#536471] dark:text-[#71767b]">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-[#0f1419] dark:text-white" />
-          <p>
-            {discoveryStatus?.issue?.message ||
-              'External video discovery is not configured on this server (missing EXTERNAL_VIDEO_API_KEY). Showing DopTube-hosted creator uploads only.'}
-          </p>
         </div>
       )}
 
@@ -250,15 +270,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 Reset filters
               </button>
             </>
-          ) : showDiscoveryNotice ? (
+          ) : showEmptyIssue ? (
             <div className="p-6 rounded-2xl border border-[#e5e7eb] dark:border-[#2f3336] bg-[#eff3f4]/50 dark:bg-[#16181c] space-y-3">
               <AlertCircle className="w-8 h-8 mx-auto text-[#0f1419] dark:text-white" />
               <p className="text-lg font-bold text-[#0f1419] dark:text-[#e7e9ea]">
-                Video discovery key required on server
+                Feed is refreshing
               </p>
               <p className="text-sm text-[#536471] dark:text-[#71767b] leading-relaxed">
-                {discoveryStatus?.issue?.message ||
-                  'Set EXTERNAL_VIDEO_API_KEY (YouTube Data API v3 key) in your server / Vercel Environment Variables and redeploy to load external discovery feeds.'}
+                {discoveryStatus?.issue?.message || 'Unable to fetch discovery feeds right now.'}
               </p>
               <div className="pt-2 flex flex-wrap justify-center gap-2.5">
                 {user ? (
@@ -292,6 +311,51 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
       ) : (
         <>
+          {/* JioHotstar Featured Spotlight Hero Card */}
+          {featuredHero && (
+            <section className="mx-3 sm:mx-0 mt-3 mb-6 rounded-2xl overflow-hidden relative aspect-[16/9] sm:aspect-[21/9] bg-[#070b18] border border-[#e5e7eb] dark:border-[#1e2638] shadow-xl group">
+              <img
+                src={featuredHero.thumbnailUrl}
+                alt={featuredHero.title}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#040714]/95 via-[#040714]/65 to-transparent pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#040714] via-transparent to-transparent pointer-events-none" />
+
+              <div className="absolute inset-x-0 bottom-0 p-4 sm:p-7 flex flex-col items-start max-w-2xl">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-[#38bdf8]">
+                  New Release · {featuredHero.language}
+                </span>
+                <h1 className="mt-1 text-lg sm:text-2xl md:text-3xl font-extrabold text-white leading-tight line-clamp-2">
+                  {featuredHero.title}
+                </h1>
+                <p className="mt-1.5 text-xs sm:text-sm text-slate-300 font-mono-nums">
+                  {featuredHero.channelName} · {formatViews(featuredHero.views)} views
+                </p>
+
+                <div className="mt-4 flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => onWatch(featuredHero.id, featuredHero)}
+                    className="h-10 sm:h-11 px-5 sm:px-6 rounded-xl jio-gradient text-white text-sm font-bold inline-flex items-center gap-2 shadow-lg shadow-blue-600/30 hover:brightness-110 cursor-pointer transition-all"
+                  >
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>Watch Now</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSaveWatchLater(featuredHero.id)}
+                    aria-label="Save spotlight to Watch later"
+                    className="h-10 sm:h-11 px-4 rounded-xl bg-white/15 hover:bg-white/25 backdrop-blur-md text-white text-sm font-semibold inline-flex items-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span className="hidden sm:inline">Watch Later</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
           {/* Conditional AI Sections (Continue watching, Subscriptions, Interest Spotlight, Trending India) */}
           {homeFeedTab === 'for_you' &&
             !isFiltered &&

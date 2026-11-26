@@ -154,7 +154,7 @@ export function scoreCandidate(
   if (ctx.preferredCategories.includes(video.category)) langMatch += 0.3;
   for (const term of ctx.recentSearches) {
     if (term.length >= 2 && haystack.includes(term.toLowerCase())) {
-      langMatch += 0.2;
+      langMatch += 0.08;
       break;
     }
   }
@@ -221,26 +221,70 @@ export function scoreCandidate(
   return Number(Math.max(0, finalScore).toFixed(3));
 }
 
-export function diversifyFeed<T extends { channelId: string; category: string }>(items: T[], maxConsecutiveCreator = 1, maxConsecutiveCategory = 2): T[] {
+function normalizeTitlePrefix(title?: string): string {
+  if (!title) return '';
+  return title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 2)
+    .slice(0, 4)
+    .join(' ');
+}
+
+export function diversifyFeed<T extends { channelId: string; category: string; title?: string }>(
+  items: T[],
+  maxConsecutiveCreator = 1,
+  maxConsecutiveCategory = 2,
+  maxPerCreatorInTopWindow = 2,
+  topWindowSize = 15
+): T[] {
   const remaining = [...items];
   const output: T[] = [];
+  const creatorCountInWindow = new Map<string, number>();
+  const seenTitlePrefixes = new Set<string>();
 
   while (remaining.length > 0) {
-    let pickedIdx = 0;
+    let pickedIdx = -1;
     for (let i = 0; i < remaining.length; i++) {
       const cand = remaining[i];
       const recentCreators = output.slice(-maxConsecutiveCreator).map((x) => x.channelId);
       const recentCats = output.slice(-maxConsecutiveCategory).map((x) => x.category);
 
-      const creatorClash = recentCreators.length === maxConsecutiveCreator && recentCreators.every((c) => c === cand.channelId);
+      const creatorClash =
+        recentCreators.length === maxConsecutiveCreator && recentCreators.every((c) => c === cand.channelId);
       const catClash = recentCats.length === maxConsecutiveCategory && recentCats.every((c) => c === cand.category);
+      const windowCreatorCount = creatorCountInWindow.get(cand.channelId) ?? 0;
+      const windowCapClash = output.length < topWindowSize && windowCreatorCount >= maxPerCreatorInTopWindow;
+      const prefix = normalizeTitlePrefix(cand.title);
+      const titleDupClash = prefix.length >= 8 && seenTitlePrefixes.has(prefix);
 
-      if (!creatorClash && !catClash) {
+      if (!creatorClash && !catClash && !windowCapClash && !titleDupClash) {
         pickedIdx = i;
         break;
       }
     }
-    output.push(remaining.splice(pickedIdx, 1)[0]);
+
+    // Relax titleDup & category constraints before relaxing strict creator repetition
+    if (pickedIdx === -1) {
+      for (let i = 0; i < remaining.length; i++) {
+        const cand = remaining[i];
+        const lastCreator = output[output.length - 1]?.channelId;
+        if (lastCreator !== cand.channelId) {
+          pickedIdx = i;
+          break;
+        }
+      }
+    }
+    if (pickedIdx === -1) pickedIdx = 0;
+
+    const chosen = remaining.splice(pickedIdx, 1)[0];
+    output.push(chosen);
+    if (output.length <= topWindowSize) {
+      creatorCountInWindow.set(chosen.channelId, (creatorCountInWindow.get(chosen.channelId) ?? 0) + 1);
+    }
+    const prefix = normalizeTitlePrefix(chosen.title);
+    if (prefix.length >= 8) seenTitlePrefixes.add(prefix);
   }
   return output;
 }

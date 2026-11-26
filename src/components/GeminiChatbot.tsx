@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, Loader2, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Bot, Loader2, Mic, MicOff, Send, Sparkles, Trash2, X } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { apiFetch } from '../lib/api';
 
@@ -47,14 +47,82 @@ export const GeminiChatbot: React.FC<{
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [listening, setListening] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   useEffect(() => {
     if (open && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [open, messages.length, loading]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
+  const toggleVoiceInput = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    const win = window as unknown as {
+      SpeechRecognition?: new () => {
+        lang: string;
+        interimResults: boolean;
+        onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+        onerror: () => void;
+        onend: () => void;
+        start: () => void;
+        stop: () => void;
+      };
+      webkitSpeechRecognition?: new () => {
+        lang: string;
+        interimResults: boolean;
+        onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+        onerror: () => void;
+        onend: () => void;
+        start: () => void;
+        stop: () => void;
+      };
+    };
+    const Rec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    if (!Rec) {
+      setError('Voice input is not supported in this browser. Type your question below.');
+      return;
+    }
+    try {
+      const rec = new Rec();
+      rec.lang = 'en-IN';
+      rec.interimResults = false;
+      rec.onresult = (e) => {
+        const transcript = e.results?.[0]?.[0]?.transcript?.trim();
+        if (transcript) {
+          setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        }
+      };
+      rec.onerror = () => setListening(false);
+      rec.onend = () => setListening(false);
+      recognitionRef.current = rec;
+      setListening(true);
+      rec.start();
+    } catch {
+      setListening(false);
+    }
+  };
 
   const sendMessage = async (textOverride?: string) => {
     const clean = (textOverride ?? input).trim();
@@ -109,13 +177,18 @@ export const GeminiChatbot: React.FC<{
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label="Open DopTube AI Assistant"
-          className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 h-12 px-4 rounded-full jio-gradient text-white font-bold text-sm shadow-xl shadow-blue-600/30 flex items-center gap-2 cursor-pointer hover:brightness-110 transition-all ${
+          aria-label="Ask DopTube AI"
+          className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 p-[1.5px] rounded-full bg-gradient-to-r from-[#38bdf8] via-[#818cf8] to-[#ec4899] shadow-[0_8px_28px_rgba(56,189,248,0.28)] cursor-pointer hover:scale-[1.03] active:scale-[0.98] transition-all ${
             hideOnMobile ? 'hidden md:flex' : 'flex'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>DopTube AI</span>
+          <span className="h-11 px-4 rounded-full bg-[#090e24]/95 backdrop-blur-md text-white font-semibold text-[15px] flex items-center gap-2">
+            <span className="relative inline-flex items-center justify-center">
+              <Mic className="w-[18px] h-[18px] text-[#e2e8f0]" />
+              <Sparkles className="w-2.5 h-2.5 text-[#38bdf8] absolute -top-1 -right-1 fill-current" />
+            </span>
+            <span>Ask</span>
+          </span>
         </button>
       )}
 
@@ -251,6 +324,19 @@ export const GeminiChatbot: React.FC<{
             onSubmit={handleSubmit}
             className="p-3 border-t border-[#e5e7eb] dark:border-[#1f2937] flex items-center gap-2 bg-white dark:bg-[#0b0f19]"
           >
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+              title={listening ? 'Listening...' : 'Voice input'}
+              className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                listening
+                  ? 'bg-rose-500 text-white animate-pulse'
+                  : 'bg-[#eff3f4] dark:bg-[#16181c] text-[#536471] dark:text-[#9ca3af] hover:text-[#0f1419] dark:hover:text-white'
+              }`}
+            >
+              {listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
             <input
               type="text"
               value={input}

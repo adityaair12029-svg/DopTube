@@ -64,6 +64,16 @@ import { registerMusicRoutes } from './musicRoutes.ts';
 import { computeViewsLast30Days } from './recommendation.ts';
 import { validateContentCandidate } from './validation.ts';
 
+const ADMIN_EMAIL = 'doptails@gmail.com';
+
+const asyncRoute =
+  <T extends express.Request>(
+    fn: (req: T, res: express.Response, next: express.NextFunction) => Promise<void> | void
+  ): express.RequestHandler =>
+  (req, res, next) => {
+    Promise.resolve(fn(req as T, res, next)).catch(next);
+  };
+
 let readyPromise: Promise<void> | null = null;
 export function ensureServerReady(): Promise<void> {
   if (!readyPromise) {
@@ -91,18 +101,19 @@ app.use(async (_req, _res, next) => {
 app.use(express.json({ limit: '4mb' }));
 app.use((req, _res, next) => {
   const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
-  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'doobtube.vercel.app';
+  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'doptube.vercel.app';
   const origin = req.headers.origin || req.headers.referer || `${proto}://${host}/`;
   runWithDiscoveryReferer(String(origin), next);
 });
 app.use(attachAuth);
 
 app.get('/api/health', (_req, res) => {
+  const discoveryStatus = getDiscoveryStatus();
   res.json({
     ok: true,
     env: process.env.VERCEL ? 'vercel' : 'node',
-    externalDiscovery: Boolean(getExternalApiKey()),
-    discoveryStatus: getDiscoveryStatus(),
+    externalDiscovery: Boolean(getExternalApiKey()) || discoveryStatus.configured,
+    discoveryStatus,
   });
 });
 
@@ -178,7 +189,7 @@ function ensureExternalChannelStub(channel: {
 }
 
 export async function ensureExternalVideoRecord(videoId: string, extData?: DiscoveryResult): Promise<boolean> {
-  if (!videoId.startsWith('ext_')) return true;
+  if (!videoId.startsWith('ext_') && !videoId.startsWith('dm_')) return true;
   const existing = db.prepare('SELECT id FROM videos WHERE id = ?').get(videoId);
   if (existing) return true;
 
@@ -194,7 +205,7 @@ export async function ensureExternalVideoRecord(videoId: string, extData?: Disco
     subscriberCount: resolved.subscriberCount,
   });
 
-  const rawRef = videoId.slice(4);
+  const rawRef = videoId.startsWith('dm_') ? videoId.slice(3) : videoId.slice(4);
   db.prepare(`
     INSERT OR IGNORE INTO videos (
       id, channel_id, title, description, category, language, tags_json,
@@ -509,9 +520,7 @@ app.post('/api/auth/avatar', requireAuth, (req: AuthedRequest, res) => {
   res.json({ user: getUserPayload(uid) });
 });
 
-const ADMIN_EMAIL = 'doptails@gmail.com';
-
-app.post('/api/auth/google', rateLimit(30, 60_000), async (req, res) => {
+app.post('/api/auth/google', rateLimit(30, 60_000), asyncRoute(async (req, res) => {
   const { idToken } = req.body as { idToken?: string };
   if (!idToken || typeof idToken !== 'string') {
     res.status(400).json({ error: 'Google ID token is required.' });
@@ -596,7 +605,7 @@ app.post('/api/auth/google', rateLimit(30, 60_000), async (req, res) => {
   setSessionCookie(res, token, req);
   logAudit(userId, 'GOOGLE_LOGIN', 'user', userId, { email: normalizedEmail });
   res.json({ user: getUserPayload(userId), token });
-});
+}));
 
 app.post('/api/auth/logout', (req, res) => {
   clearSessionCookie(res, req);
@@ -754,7 +763,7 @@ app.get('/api/stream/:id', (req, res) => {
 // VIDEOS, FEED, UPLOAD & PROCESSING
 // =========================================================================
 
-app.get('/api/videos', async (req: AuthedRequest, res) => {
+app.get('/api/videos', asyncRoute(async (req: AuthedRequest, res) => {
   const { category = 'All', language = 'All', shorts, trending, sort, q, nativeOnly } = req.query as Record<string, string | undefined>;
   const ctx = buildUserAiContext(req.auth?.userId);
   const rows = db.prepare(`
@@ -816,9 +825,9 @@ app.get('/api/videos', async (req: AuthedRequest, res) => {
   }
 
   res.json({ videos: combined });
-});
+}));
 
-app.get('/api/videos/:id', async (req: AuthedRequest, res) => {
+app.get('/api/videos/:id', asyncRoute(async (req: AuthedRequest, res) => {
   const id = req.params.id;
   const row = db.prepare(`
     SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
@@ -845,7 +854,7 @@ app.get('/api/videos/:id', async (req: AuthedRequest, res) => {
       row.views += 1;
       videoData = hydrateVideoRow(row);
     }
-  } else if (id.startsWith('ext_')) {
+  } else if (id.startsWith('ext_') || id.startsWith('dm_')) {
     const extFetched = await fetchExternalVideoById(id);
     if (extFetched) {
       videoData = extFetched.video;
@@ -922,7 +931,7 @@ app.get('/api/videos/:id', async (req: AuthedRequest, res) => {
     },
     related: combinedRelated,
   });
-});
+}));
 
 async function runFfmpegProcessingPipeline(videoId: string, uploadedVideoPath: string, hasCustomThumb: boolean) {
   const updateJob = (stage: string, progress: number, status = 'processing', errorMsg: string | null = null) => {
@@ -1125,7 +1134,7 @@ app.delete('/api/videos/:id', requireAuth, (req: AuthedRequest, res) => {
 // UNIFIED SEARCH & SUGGESTIONS (WITH PAGE TOKEN PAGINATION)
 // =========================================================================
 
-app.get('/api/search', async (req: AuthedRequest, res) => {
+app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
   const {
     q = '',
     category = 'All',
@@ -1200,7 +1209,7 @@ app.get('/api/search', async (req: AuthedRequest, res) => {
     hasMore: Boolean(extPaged.nextPageToken),
     discoveryStatus: getDiscoveryStatus(),
   });
-});
+}));
 
 app.get('/api/search/suggestions', (req: AuthedRequest, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
@@ -1255,7 +1264,7 @@ app.delete('/api/search/history/:id', requireAuth, (req: AuthedRequest, res) => 
 // SOCIAL FEATURES: REACTIONS, COMMENTS, SUBSCRIPTIONS, PLAYLISTS, HISTORY
 // =========================================================================
 
-app.post('/api/videos/:id/react', requireAuth, rateLimit(60, 60_000), async (req: AuthedRequest, res) => {
+app.post('/api/videos/:id/react', requireAuth, rateLimit(60, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
   const videoId = req.params.id;
   const uid = req.auth!.userId;
   const { reaction } = req.body as { reaction?: 'like' | 'dislike' | 'none' };
@@ -1290,7 +1299,7 @@ app.post('/api/videos/:id/react', requireAuth, rateLimit(60, 60_000), async (req
 
   const updated = db.prepare('SELECT likes, dislikes FROM videos WHERE id = ?').get(videoId) as { likes: number; dislikes: number };
   res.json({ userReaction: reaction, ...updated });
-});
+}));
 
 app.get('/api/videos/:id/comments', (req, res) => {
   const rows = db.prepare(`
@@ -1320,7 +1329,7 @@ app.get('/api/videos/:id/comments', (req, res) => {
   res.json({ comments });
 });
 
-app.post('/api/videos/:id/comments', requireAuth, rateLimit(20, 60_000), async (req: AuthedRequest, res) => {
+app.post('/api/videos/:id/comments', requireAuth, rateLimit(20, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
   const { body } = req.body as { body?: string };
   const err = validateCommentInput(body);
   if (err) {
@@ -1337,7 +1346,7 @@ app.post('/api/videos/:id/comments', requireAuth, rateLimit(20, 60_000), async (
     new Date().toISOString()
   );
   res.status(201).json({ id: commentId });
-});
+}));
 
 app.post('/api/comments/:id/reply', requireAuth, rateLimit(20, 60_000), (req: AuthedRequest, res) => {
   const { body } = req.body as { body?: string };
@@ -1357,11 +1366,11 @@ app.post('/api/comments/:id/reply', requireAuth, rateLimit(20, 60_000), (req: Au
   res.status(201).json({ id: replyId });
 });
 
-app.get('/api/channels/:id', async (req: AuthedRequest, res) => {
+app.get('/api/channels/:id', asyncRoute(async (req: AuthedRequest, res) => {
   const requestedId = req.params.id;
   const pageToken = String(req.query.pageToken || '').trim();
 
-  if (requestedId.startsWith('ext_ch_')) {
+  if (requestedId.startsWith('ext_ch_') || requestedId.startsWith('dm_ch_')) {
     const extCh = await fetchExternalChannelById(requestedId, pageToken);
     if (!extCh) {
       res.status(404).json({ error: 'Channel not found.' });
@@ -1411,7 +1420,7 @@ app.get('/api/channels/:id', async (req: AuthedRequest, res) => {
     hasMore: false,
     totalResults: videos.length,
   });
-});
+}));
 
 app.patch('/api/channels/me', requireAuth, (req: AuthedRequest, res) => {
   const { name, description, bannerColor } = req.body as { name?: string; description?: string; bannerColor?: string };
@@ -1428,10 +1437,10 @@ app.patch('/api/channels/me', requireAuth, (req: AuthedRequest, res) => {
   res.json({ user: getUserPayload(req.auth!.userId) });
 });
 
-app.post('/api/channels/:id/subscribe', requireAuth, async (req: AuthedRequest, res) => {
+app.post('/api/channels/:id/subscribe', requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
   const uid = req.auth!.userId;
   const channelId = req.params.id;
-  if (channelId.startsWith('ext_ch_')) {
+  if (channelId.startsWith('ext_ch_') || channelId.startsWith('dm_ch_')) {
     const extCh = await fetchExternalChannelById(channelId);
     if (extCh) ensureExternalChannelStub(extCh.channel);
   }
@@ -1457,7 +1466,7 @@ app.post('/api/channels/:id/subscribe', requireAuth, async (req: AuthedRequest, 
     db.prepare('UPDATE channels SET subscriber_count = subscriber_count + 1 WHERE id = ?').run(channelId);
     res.json({ subscribed: true, subscriberCount: ch.subscriber_count + 1 });
   }
-});
+}));
 
 app.get('/api/subscriptions', (req: AuthedRequest, res) => {
   if (!req.auth) {
@@ -1551,7 +1560,7 @@ app.get('/api/watch-later', requireAuth, (req: AuthedRequest, res) => {
   res.json({ videos: rows.map(hydrateVideoRow) });
 });
 
-app.post('/api/watch-later/:videoId', requireAuth, async (req: AuthedRequest, res) => {
+app.post('/api/watch-later/:videoId', requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
   const uid = req.auth!.userId;
   const vid = req.params.videoId;
   await ensureExternalVideoRecord(vid);
@@ -1563,7 +1572,7 @@ app.post('/api/watch-later/:videoId', requireAuth, async (req: AuthedRequest, re
     db.prepare('INSERT INTO watch_later (user_id, video_id, added_at) VALUES (?, ?, ?)').run(uid, vid, new Date().toISOString());
     res.json({ saved: true });
   }
-});
+}));
 
 app.get('/api/liked-videos', requireAuth, (req: AuthedRequest, res) => {
   const rows = db.prepare(`
@@ -1620,7 +1629,7 @@ app.post('/api/playlists', requireAuth, (req: AuthedRequest, res) => {
   res.status(201).json({ id, title: title.trim() });
 });
 
-app.post('/api/playlists/:id/videos', requireAuth, async (req: AuthedRequest, res) => {
+app.post('/api/playlists/:id/videos', requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
   const { videoId } = req.body as { videoId?: string };
   if (!videoId) {
     res.status(400).json({ error: 'videoId required.' });
@@ -1642,7 +1651,7 @@ app.post('/api/playlists/:id/videos', requireAuth, async (req: AuthedRequest, re
     new Date().toISOString()
   );
   res.json({ ok: true });
-});
+}));
 
 app.delete('/api/playlists/:id/videos/:videoId', requireAuth, (req: AuthedRequest, res) => {
   const own = db.prepare('SELECT id FROM playlists WHERE id = ? AND user_id = ?').get(req.params.id, req.auth!.userId);

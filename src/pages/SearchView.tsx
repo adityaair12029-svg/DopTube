@@ -181,15 +181,16 @@ export const SearchView: React.FC<SearchViewProps> = ({
         </div>
       ) : videos.length === 0 ? (
         <div className="py-16 text-center max-w-lg mx-auto">
-          {showDiscoveryNotice ? (
+          {showDiscoveryNotice && discoveryStatus?.issue ? (
             <div className="p-6 rounded-2xl border border-[#e5e7eb] dark:border-[#2f3336] bg-[#eff3f4]/50 dark:bg-[#16181c] space-y-2.5">
               <AlertCircle className="w-7 h-7 mx-auto text-[#0f1419] dark:text-white" />
               <p className="text-base font-bold text-[#0f1419] dark:text-[#e7e9ea]">
-                External search requires a server API key
+                {discoveryStatus.issue.code === 'quota_exceeded'
+                  ? 'External video quota temporarily reached'
+                  : 'No videos matched right now'}
               </p>
               <p className="text-sm text-[#536471] dark:text-[#71767b]">
-                {discoveryStatus?.issue?.message ||
-                  'Add EXTERNAL_VIDEO_API_KEY in Vercel Environment Variables and redeploy to search all videos.'}
+                {discoveryStatus.issue.message}
               </p>
             </div>
           ) : (

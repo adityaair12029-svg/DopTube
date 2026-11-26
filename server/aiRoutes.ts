@@ -26,6 +26,12 @@ import {
 import { GoogleGenAI } from '@google/genai';
 import { validateContentCandidate } from './validation.ts';
 
+const asyncRoute =
+  (fn: (req: AuthedRequest, res: any) => Promise<void> | void) =>
+  (req: any, res: any, next: any) => {
+    Promise.resolve(fn(req as AuthedRequest, res)).catch(next);
+  };
+
 export function registerAiAndLibraryRoutes(
   app: Express,
   ensureExternalVideoRecord: (videoId: string, extData?: DiscoveryResult) => Promise<boolean>
@@ -34,7 +40,7 @@ export function registerAiAndLibraryRoutes(
   // PERSONALIZED RECOMMENDATIONS, SECTIONS, SHORTS, TRENDING, NEXT-VIDEO
   // =========================================================================
 
-  const handleHomeFeed = async (req: AuthedRequest, res: Express['response'] | any) => {
+  const handleHomeFeed = asyncRoute(async (req: AuthedRequest, res: Express['response'] | any) => {
     const {
       category = 'All',
       language = 'All',
@@ -186,7 +192,7 @@ export function registerAiAndLibraryRoutes(
       });
     }
 
-    res.json({
+      res.status(200).json({
       videos: rec.items,
       sections,
       nextCursor: respNextCursor,
@@ -195,12 +201,12 @@ export function registerAiAndLibraryRoutes(
       total: rec.total,
       discoveryStatus: getDiscoveryStatus(),
     });
-  };
+  });
 
   app.get('/api/recommendations/home', handleHomeFeed);
   app.get('/api/feed/home', handleHomeFeed);
 
-  app.get('/api/recommendations/trending', async (req: AuthedRequest, res) => {
+  app.get('/api/recommendations/trending', asyncRoute(async (req: AuthedRequest, res) => {
     const language = String(req.query.language || 'All');
     const pageToken = String(req.query.pageToken || '').trim();
     const ctx = buildUserAiContext(req.auth?.userId);
@@ -219,9 +225,9 @@ export function registerAiAndLibraryRoutes(
       hasMore: Boolean(extPaged.nextPageToken),
       discoveryStatus: getDiscoveryStatus(),
     });
-  });
+  }));
 
-  app.get('/api/recommendations/shorts', async (req: AuthedRequest, res) => {
+  app.get('/api/recommendations/shorts', asyncRoute(async (req: AuthedRequest, res) => {
     const language = String(req.query.language || 'All');
     const pageToken = String(req.query.pageToken || '').trim();
     const ctx = buildUserAiContext(req.auth?.userId);
@@ -253,9 +259,9 @@ export function registerAiAndLibraryRoutes(
       hasMore: Boolean(extPaged.nextPageToken),
       discoveryStatus: getDiscoveryStatus(),
     });
-  });
+  }));
 
-  app.get('/api/recommendations/related/:videoId', async (req: AuthedRequest, res) => {
+  app.get('/api/recommendations/related/:videoId', asyncRoute(async (req: AuthedRequest, res) => {
     const videoId = req.params.videoId;
     const ctx = buildUserAiContext(req.auth?.userId);
     let current: CandidateVideo | null = null;
@@ -271,7 +277,7 @@ export function registerAiAndLibraryRoutes(
       .get(videoId) as VideoDbRow | undefined;
 
     if (row) current = toCandidate(hydrateVideoRow(row));
-    if (videoId.startsWith('ext_')) {
+    if (videoId.startsWith('ext_') || videoId.startsWith('dm_')) {
       const extFetched = await fetchExternalVideoById(videoId);
       if (extFetched) {
         current = toCandidate(extFetched.video);
@@ -286,9 +292,9 @@ export function registerAiAndLibraryRoutes(
 
     const ranked = getRelatedCandidatePool(current, ctx, extRelated);
     res.json({ videos: ranked.slice(0, 16) });
-  });
+  }));
 
-  app.get('/api/recommendations/next-video', async (req: AuthedRequest, res) => {
+  app.get('/api/recommendations/next-video', asyncRoute(async (req: AuthedRequest, res) => {
     const currentVideoId = String(req.query.currentVideoId || '');
     const mode = (String(req.query.mode || 'recommended') as 'recommended' | 'playlist' | 'queue' | 'repeat');
     const playlistId = String(req.query.playlistId || '');
@@ -328,7 +334,7 @@ export function registerAiAndLibraryRoutes(
     if (row) currentVideo = toCandidate(hydrateVideoRow(row));
 
     let extRelated: DiscoveryResult[] = [];
-    if (currentVideoId.startsWith('ext_')) {
+    if (currentVideoId.startsWith('ext_') || currentVideoId.startsWith('dm_')) {
       const extFetched = await fetchExternalVideoById(currentVideoId);
       if (extFetched) {
         currentVideo = currentVideo ?? toCandidate(extFetched.video);
@@ -366,7 +372,7 @@ export function registerAiAndLibraryRoutes(
 
     const fromPool = related.find((v) => v.id === resolution.nextVideoId);
     res.json({ nextVideo: fromPool ?? null, source: resolution.source });
-  });
+  }));
 
   // =========================================================================
   // BEHAVIOR TRACKING & FEEDBACK EVENTS

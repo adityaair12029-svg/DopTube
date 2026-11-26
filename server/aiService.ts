@@ -78,7 +78,19 @@ export function hydrateVideoRow(r: VideoDbRow): HydratedVideoRow {
   } catch {
     tags = [];
   }
-  const extRef = r.external_ref || (r.id.startsWith('ext_') ? r.id.slice(4) : '');
+  const isDailymotion = r.id.startsWith('dm_');
+  const extRef =
+    r.external_ref ||
+    (r.id.startsWith('ext_') ? r.id.slice(4) : isDailymotion ? r.id.slice(3) : '');
+  const externalEmbedUrl =
+    r.source_type === 'external' && extRef
+      ? isDailymotion
+        ? `https://www.dailymotion.com/embed/video/${extRef}?autoplay=1`
+        : r.is_short === 1
+        ? `https://www.youtube-nocookie.com/embed/${extRef}?autoplay=1&playsinline=1&loop=1&playlist=${extRef}&rel=0&modestbranding=1&iv_load_policy=3`
+        : `https://www.youtube-nocookie.com/embed/${extRef}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`
+      : undefined;
+
   return {
     id: r.id,
     channelId: r.channel_id,
@@ -100,14 +112,7 @@ export function hydrateVideoRow(r: VideoDbRow): HydratedVideoRow {
     visibility: r.visibility,
     status: r.status,
     sourceType: r.source_type,
-    ...(r.source_type === 'external' && extRef
-      ? {
-          externalEmbedUrl:
-            r.is_short === 1
-              ? `https://www.youtube-nocookie.com/embed/${extRef}?autoplay=1&playsinline=1&loop=1&playlist=${extRef}&rel=0&modestbranding=1&iv_load_policy=3`
-              : `https://www.youtube-nocookie.com/embed/${extRef}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`,
-        }
-      : {}),
+    ...(externalEmbedUrl ? { externalEmbedUrl } : {}),
     isShort: r.is_short === 1,
     isLive: r.is_live === 1,
     views: r.views,

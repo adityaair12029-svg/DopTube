@@ -135,6 +135,8 @@ export interface DiscoveryIssueInfo {
 
 export interface DiscoveryStatus {
   configured: boolean;
+  providers?: string[];
+  youtubeConfigured?: boolean;
   issue: DiscoveryIssueInfo | null;
 }
 
