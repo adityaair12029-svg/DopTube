@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AppPage,
   ChannelSummary,
+  DiscoveryStatus,
   HomepageSection,
   MusicTrack,
   NotificationItem,
@@ -9,8 +10,8 @@ import type {
   UserProfile,
   VideoItem,
 } from './types';
-import { apiFetch } from './lib/api';
-import { signOutFirebase } from './firebase';
+import { apiFetch, clearAuthToken, getAuthToken, setAuthToken } from './lib/api';
+import { onFirebaseAuthState, signOutFirebase } from './firebase';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { MiniPlayer } from './components/MiniPlayer';
@@ -64,6 +65,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Personalized Home feed + infinite scroll state
+  const [homeFeedTab, setHomeFeedTab] = useState<'for_you' | 'following'>('for_you');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [videos, setVideos] = useState<VideoItem[]>([]);
@@ -77,6 +79,10 @@ export default function App() {
   const [shortsNextPageToken, setShortsNextPageToken] = useState('');
   const [shortsHasMore, setShortsHasMore] = useState(false);
   const [shortsLoadingMore, setShortsLoadingMore] = useState(false);
+  const [discoveryStatus, setDiscoveryStatus] = useState<DiscoveryStatus | null>(null);
+  const [followingMeta, setFollowingMeta] = useState<{ empty?: boolean; requiresAuth?: boolean }>({});
+  const explicitLoggedOutRef = useRef(false);
+  const recoveryAttemptedRef = useRef(false);
 
   // Playback, Autoplay & Queue state
   const [queue, setQueue] = useState<VideoItem[]>([]);
@@ -185,18 +191,31 @@ export default function App() {
           nextCursor: number | null;
           nextPageToken?: string | null;
           hasMore: boolean;
+          discoveryStatus?: DiscoveryStatus | null;
+          followingEmpty?: boolean;
+          followingRequiresAuth?: boolean;
         }>(
-          `/api/recommendations/home?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(
-            selectedLanguage
-          )}&cursor=0&limit=12`
+          `/api/recommendations/home?shorts=0&feedFilter=${encodeURIComponent(homeFeedTab)}&category=${encodeURIComponent(
+            selectedCategory
+          )}&language=${encodeURIComponent(selectedLanguage)}&cursor=0&limit=12`
         ),
-        apiFetch<{ videos: VideoItem[]; nextPageToken?: string | null; hasMore?: boolean }>('/api/recommendations/shorts'),
+        apiFetch<{
+          videos: VideoItem[];
+          nextPageToken?: string | null;
+          hasMore?: boolean;
+          discoveryStatus?: DiscoveryStatus | null;
+        }>('/api/recommendations/shorts'),
       ]);
       setVideos(mainRes.videos);
       setSections(mainRes.sections || []);
       setNextCursor(mainRes.nextCursor ?? null);
       setHomeNextPageToken(mainRes.nextPageToken || '');
       setHasMore(Boolean(mainRes.hasMore));
+      setFollowingMeta({
+        empty: Boolean(mainRes.followingEmpty),
+        requiresAuth: Boolean(mainRes.followingRequiresAuth),
+      });
+      setDiscoveryStatus(mainRes.discoveryStatus ?? shortsRes.discoveryStatus ?? null);
       setShorts(shortsRes.videos);
       setShortsNextPageToken(shortsRes.nextPageToken || '');
       setShortsHasMore(Boolean(shortsRes.hasMore || shortsRes.nextPageToken));
@@ -209,7 +228,32 @@ export default function App() {
     } finally {
       setFeedLoading(false);
     }
-  }, [selectedCategory, selectedLanguage]);
+  }, [homeFeedTab, selectedCategory, selectedLanguage]);
+
+  useEffect(() => {
+    const unsubscribe = onFirebaseAuthState(async (fbUser) => {
+      if (!fbUser || explicitLoggedOutRef.current || getAuthToken() || recoveryAttemptedRef.current) {
+        return;
+      }
+      recoveryAttemptedRef.current = true;
+      try {
+        const idToken = await fbUser.getIdToken();
+        const res = await apiFetch<{ user: UserProfile; token?: string }>('/api/auth/google', {
+          method: 'POST',
+          body: JSON.stringify({ idToken }),
+        });
+        if (res.token) setAuthToken(res.token);
+        if (res.user) {
+          setUser(res.user);
+          void loadUserContext();
+          void loadFeed();
+        }
+      } catch {
+        // silent fallback recovery best-effort
+      }
+    });
+    return () => unsubscribe();
+  }, [loadFeed, loadUserContext]);
 
   useEffect(() => {
     void loadFeed();
@@ -226,9 +270,9 @@ export default function App() {
         nextPageToken?: string | null;
         hasMore: boolean;
       }>(
-        `/api/recommendations/home?shorts=0&category=${encodeURIComponent(selectedCategory)}&language=${encodeURIComponent(
-          selectedLanguage
-        )}&cursor=${nextCursor ?? 0}&limit=12${tokenQs}`
+        `/api/recommendations/home?shorts=0&feedFilter=${encodeURIComponent(homeFeedTab)}&category=${encodeURIComponent(
+          selectedCategory
+        )}&language=${encodeURIComponent(selectedLanguage)}&cursor=${nextCursor ?? 0}&limit=12${tokenQs}`
       );
       setVideos((prev) => {
         const existing = new Set(prev.map((v) => v.id));
@@ -243,7 +287,7 @@ export default function App() {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, nextCursor, homeNextPageToken, selectedCategory, selectedLanguage]);
+  }, [loadingMore, hasMore, nextCursor, homeNextPageToken, homeFeedTab, selectedCategory, selectedLanguage]);
 
   const handleLoadMoreShorts = useCallback(async () => {
     if (shortsLoadingMore || !shortsHasMore || !shortsNextPageToken) return;
@@ -279,6 +323,7 @@ export default function App() {
           channels: ChannelSummary[];
           nextPageToken?: string | null;
           hasMore?: boolean;
+          discoveryStatus?: DiscoveryStatus | null;
         }>(
           `/api/search?q=${encodeURIComponent(q)}&sort=${sort}&duration=${duration}&language=${encodeURIComponent(lang)}`
         );
@@ -286,6 +331,7 @@ export default function App() {
         setSearchChannels(res.channels);
         setSearchNextPageToken(res.nextPageToken || '');
         setSearchHasMore(Boolean(res.hasMore || res.nextPageToken));
+        if (res.discoveryStatus) setDiscoveryStatus(res.discoveryStatus);
       } catch {
         setSearchResults([]);
         setSearchChannels([]);
@@ -570,7 +616,10 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await apiFetch('/api/auth/logout', { method: 'POST' });
+    explicitLoggedOutRef.current = true;
+    recoveryAttemptedRef.current = false;
+    clearAuthToken();
+    await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     await signOutFirebase().catch(() => {});
     setUser(null);
     setNotifications([]);
@@ -615,7 +664,7 @@ export default function App() {
   const infiniteScrollEnabled = true;
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#0f0f0f] text-[#0f0f0f] dark:text-[#f1f1f1]">
+    <div className="min-h-screen bg-white dark:bg-black text-[#0f1419] dark:text-[#e7e9ea]">
       <Header
         user={user}
         theme={theme}
@@ -664,11 +713,22 @@ export default function App() {
             loadingMore={loadingMore}
             hasMore={hasMore}
             infiniteScrollEnabled={infiniteScrollEnabled}
+            homeFeedTab={homeFeedTab}
+            onChangeHomeFeedTab={(nextTab) => {
+              setHomeFeedTab(nextTab);
+              setNextCursor(null);
+              setHomeNextPageToken('');
+            }}
+            discoveryStatus={discoveryStatus}
+            followingMeta={followingMeta}
+            user={user}
             selectedCategory={selectedCategory}
             selectedLanguage={selectedLanguage}
             onSelectCategory={setSelectedCategory}
             onSelectLanguage={setSelectedLanguage}
             onLoadMore={handleLoadMore}
+            onOpenAuth={() => setAuthOpen(true)}
+            onOpenUpload={handleOpenUpload}
             onOpenShort={(shortId, shortObj) => openShort(shortId, shortObj)}
             onImpressions={handleImpressions}
             {...commonCardActions}
@@ -683,6 +743,7 @@ export default function App() {
             loading={searchLoading}
             loadingMore={searchLoadingMore}
             hasMore={searchHasMore}
+            discoveryStatus={discoveryStatus}
             onLoadMore={handleLoadMoreSearch}
             sort={searchSort}
             duration={searchDuration}
@@ -728,6 +789,7 @@ export default function App() {
             user={user}
             hasMore={shortsHasMore}
             loadingMore={shortsLoadingMore}
+            discoveryStatus={discoveryStatus}
             onLoadMore={handleLoadMoreShorts}
             onSubscriptionsChanged={loadUserContext}
             onOpenAuth={() => setAuthOpen(true)}
@@ -918,6 +980,8 @@ export default function App() {
         theme={theme}
         onClose={() => setAuthOpen(false)}
         onSuccess={(loggedInUser) => {
+          explicitLoggedOutRef.current = false;
+          recoveryAttemptedRef.current = false;
           setUser(loggedInUser);
           void loadUserContext();
           void loadFeed();
@@ -969,7 +1033,7 @@ export default function App() {
       {toast && (
         <div
           role="status"
-          className="fixed bottom-16 md:bottom-6 left-4 md:left-6 z-50 px-4 py-2.5 rounded-lg bg-[#212121] dark:bg-[#f1f1f1] text-white dark:text-[#0f0f0f] text-sm font-medium shadow-xl"
+          className="fixed bottom-16 md:bottom-6 left-4 md:left-6 z-50 px-4 py-2.5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black border border-[#e5e7eb] dark:border-[#2f3336] text-sm font-medium shadow-xl"
         >
           {toast}
         </div>

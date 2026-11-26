@@ -83,6 +83,41 @@ export interface SessionPayload {
   userId: string;
   role: 'user' | 'creator' | 'admin';
   exp: number;
+  name?: string;
+  email?: string;
+  handle?: string;
+  avatarUrl?: string;
+  preferredLanguage?: string;
+  birthday?: string;
+}
+
+export function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    if (!item?.id || seen.has(item.id)) continue;
+    seen.add(item.id);
+    out.push(item);
+  }
+  return out;
+}
+
+export function buildUsernameSuggestions(name: string, preferredHandle?: string): string[] {
+  const base = (preferredHandle || name || 'creator')
+    .toLowerCase()
+    .replace(/^@+/, '')
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 14) || 'doptubeuser';
+  const year = new Date().getFullYear().toString().slice(-2);
+  const candidates = [
+    base,
+    `${base}${year}`,
+    `${base}_in`,
+    `real_${base}`,
+    `${base}07`,
+    `${base}_official`,
+  ];
+  return Array.from(new Set(candidates)).map((c) => `@${c}`);
 }
 
 export function signSessionToken(payload: SessionPayload, secret: string): string {

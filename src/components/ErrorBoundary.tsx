@@ -18,14 +18,14 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center p-6 bg-white dark:bg-[#0f0f0f] text-[#0f0f0f] dark:text-[#f1f1f1]">
-          <div className="max-w-md w-full rounded-2xl border border-neutral-200 dark:border-[#303030] p-6 text-center space-y-3">
+        <div className="min-h-screen flex items-center justify-center p-6 bg-white dark:bg-black text-[#0f1419] dark:text-[#e7e9ea]">
+          <div className="max-w-md w-full rounded-2xl border border-[#e5e7eb] dark:border-[#2f3336] p-6 text-center space-y-3">
             <h1 className="text-lg font-bold">Something went wrong</h1>
-            <p className="text-sm text-[#606060] dark:text-[#aaaaaa] break-words">{this.state.message}</p>
+            <p className="text-sm text-[#536471] dark:text-[#71767b] break-words">{this.state.message}</p>
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="h-9 px-5 rounded-full bg-[#ff0033] text-white text-sm font-semibold cursor-pointer"
+              className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
             >
               Reload DopTube
             </button>

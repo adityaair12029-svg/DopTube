@@ -126,11 +126,24 @@ export interface RecommendationAnalytics {
   topTopics: Array<{ topic: string; avgScore: number; usersCount: number }>;
 }
 
+export interface DiscoveryIssueInfo {
+  code: string;
+  status?: number;
+  message: string;
+  at: string;
+}
+
+export interface DiscoveryStatus {
+  configured: boolean;
+  issue: DiscoveryIssueInfo | null;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
   email: string;
   avatarUrl: string;
+  birthday?: string;
   role: 'user' | 'creator' | 'admin';
   preferredLanguage: string;
   restrictedMode: boolean;

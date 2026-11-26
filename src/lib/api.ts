@@ -1,8 +1,37 @@
+export const AUTH_TOKEN_STORAGE_KEY = 'doptube_auth_token';
+
+export function getAuthToken(): string {
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setAuthToken(token?: string | null) {
+  if (!token) return;
+  try {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function clearAuthToken() {
+  try {
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const res = await fetch(url, {
     credentials: 'include',
     headers: {
       'X-Requested-With': 'DopTube',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...(options?.headers ?? {}),
     },
@@ -42,6 +71,10 @@ export function uploadWithProgress(
     xhr.open('POST', url, true);
     xhr.withCredentials = true;
     xhr.setRequestHeader('X-Requested-With', 'DopTube');
+    const token = getAuthToken();
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
 
     xhr.upload.onprogress = (evt) => {
       if (evt.lengthComputable) {

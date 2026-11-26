@@ -14,6 +14,8 @@ import {
   validateVideoInput,
   validateCommentInput,
   validateCopyrightClaim,
+  dedupeById,
+  buildUsernameSuggestions,
   type RankableVideo,
 } from './domain';
 
@@ -175,3 +177,49 @@ test('validation helpers catch invalid video, comment, and copyright inputs', ()
     null
   );
 });
+
+test('cold-start session token preserves extended identity claims for serverless hydration', () => {
+  const secret = 'test-signing-key-32-chars-minimum';
+  const token = signSessionToken(
+    {
+      userId: 'u_vercel_99',
+      role: 'user',
+      exp: Date.now() + 60_000,
+      name: 'Aditya Choudhary',
+      email: 'aditya@example.com',
+      handle: '@XAdityaChoudhary',
+      preferredLanguage: 'Hindi',
+      birthday: '2001-05-14',
+    },
+    secret
+  );
+  const verified = verifySessionToken(token, secret);
+  assert.ok(verified);
+  assert.equal(verified?.name, 'Aditya Choudhary');
+  assert.equal(verified?.email, 'aditya@example.com');
+  assert.equal(verified?.handle, '@XAdityaChoudhary');
+  assert.equal(verified?.preferredLanguage, 'Hindi');
+  assert.equal(verified?.birthday, '2001-05-14');
+});
+
+test('dedupeById removes duplicate Shorts/video entries while preserving order', () => {
+  const deduped = dedupeById([
+    { id: 'v_1', title: 'First' },
+    { id: 'v_2', title: 'Second' },
+    { id: 'v_1', title: 'Duplicate First' },
+    { id: 'v_3', title: 'Third' },
+  ]);
+  assert.deepEqual(
+    deduped.map((item) => item.id),
+    ['v_1', 'v_2', 'v_3']
+  );
+  assert.equal(deduped[0].title, 'First');
+});
+
+test('buildUsernameSuggestions generates unique @-prefixed X-style handles', () => {
+  const handles = buildUsernameSuggestions('Aditya Choudhary!');
+  assert.ok(handles.length >= 4);
+  assert.ok(handles.every((h) => /^@[a-z0-9_]+$/.test(h)));
+  assert.equal(new Set(handles).size, handles.length);
+});
+

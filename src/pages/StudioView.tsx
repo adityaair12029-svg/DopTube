@@ -50,13 +50,13 @@ export const StudioView: React.FC<{
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
         <h2 className="text-xl font-bold">DopTube Creator Studio</h2>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
+        <p className="text-sm text-[#536471] dark:text-[#71767b] mt-2">
           Sign in to upload native videos, inspect FFmpeg HLS jobs, and track Indian audience analytics.
         </p>
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-9 px-5 rounded-full bg-[#ff0033] text-white text-sm font-semibold cursor-pointer"
+          className="mt-5 h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
         >
           Sign in
         </button>
@@ -122,7 +122,7 @@ export const StudioView: React.FC<{
         <button
           type="button"
           onClick={onOpenUpload}
-          className="h-10 px-5 rounded-full bg-[#ff0033] hover:bg-[#d9002b] text-white text-sm font-semibold flex items-center gap-2 cursor-pointer"
+          className="h-10 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold flex items-center gap-2 cursor-pointer"
         >
           <Upload className="w-4 h-4" />
           Upload video
@@ -141,9 +141,9 @@ export const StudioView: React.FC<{
           return (
             <div
               key={kpi.label}
-              className="p-4 rounded-xl bg-neutral-100 dark:bg-[#1a1a1a] border border-neutral-200 dark:border-[#2e2e2e]"
+              className="p-4 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]"
             >
-              <div className="flex items-center justify-between text-xs text-[#606060] dark:text-[#aaaaaa] mb-2">
+              <div className="flex items-center justify-between text-xs text-[#536471] dark:text-[#71767b] mb-2">
                 <span>{kpi.label}</span>
                 <Icon className="w-4 h-4" />
               </div>
@@ -154,8 +154,8 @@ export const StudioView: React.FC<{
       </div>
 
       {/* Videos Table */}
-      <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] overflow-hidden">
-        <div className="px-4 py-3 bg-neutral-50 dark:bg-[#181818] border-b border-neutral-200 dark:border-[#2e2e2e] font-semibold text-sm">
+      <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] overflow-hidden">
+        <div className="px-4 py-3 bg-[#eff3f4]/50 dark:bg-black/40 border-b border-[#e5e7eb] dark:border-[#2f3336] font-bold text-sm">
           Channel Content
         </div>
         {data.videos.length === 0 ? (
@@ -312,7 +312,7 @@ export const StudioView: React.FC<{
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
           <form
             onSubmit={saveEdit}
-            className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 space-y-3"
+            className="w-full max-w-lg rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-6 space-y-3"
           >
             <h3 className="font-bold text-base">Edit video details</h3>
             <div>
@@ -322,7 +322,7 @@ export const StudioView: React.FC<{
                 required
                 value={editing.title}
                 onChange={(e) => setEditing({ ...editing, title: e.target.value })}
-                className="w-full h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-9 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               />
             </div>
             <div>
@@ -331,14 +331,14 @@ export const StudioView: React.FC<{
                 rows={3}
                 value={editing.description}
                 onChange={(e) => setEditing({ ...editing, description: e.target.value })}
-                className="w-full p-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full p-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               />
             </div>
             <div className="grid grid-cols-3 gap-2">
               <select
                 value={editing.category}
                 onChange={(e) => setEditing({ ...editing, category: e.target.value })}
-                className="h-9 px-2 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-xs"
+                className="h-9 px-2 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-xs"
               >
                 {ALL_CATEGORIES.map((c) => (
                   <option key={c} value={c}>{c}</option>
@@ -347,7 +347,7 @@ export const StudioView: React.FC<{
               <select
                 value={editing.language}
                 onChange={(e) => setEditing({ ...editing, language: e.target.value })}
-                className="h-9 px-2 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-xs"
+                className="h-9 px-2 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-xs"
               >
                 {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((l) => (
                   <option key={l} value={l}>{l}</option>
@@ -356,7 +356,7 @@ export const StudioView: React.FC<{
               <select
                 value={editing.visibility}
                 onChange={(e) => setEditing({ ...editing, visibility: e.target.value })}
-                className="h-9 px-2 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-xs"
+                className="h-9 px-2 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-xs"
               >
                 <option value="public">Public</option>
                 <option value="unlisted">Unlisted</option>
@@ -367,7 +367,7 @@ export const StudioView: React.FC<{
               <button type="button" onClick={() => setEditing(null)} className="h-9 px-4 rounded-full text-sm cursor-pointer">
                 Cancel
               </button>
-              <button type="submit" className="h-9 px-4 rounded-full bg-[#ff0033] text-white text-sm font-semibold cursor-pointer">
+              <button type="submit" className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer">
                 Save
               </button>
             </div>

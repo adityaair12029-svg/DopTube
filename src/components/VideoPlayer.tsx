@@ -172,7 +172,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           src={video.externalEmbedUrl}
           title={video.title}
           className="w-full h-full border-0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
         />
       </div>
@@ -331,8 +331,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           aria-label="Play video"
           className="absolute inset-0 flex items-center justify-center bg-black/25 cursor-pointer"
         >
-          <span className="w-16 h-16 rounded-full bg-black/75 text-white flex items-center justify-center hover:bg-[#ff0033] transition-colors">
-            <Play className="w-7 h-7 fill-white ml-0.5" />
+          <span className="w-16 h-16 rounded-full bg-black/80 border border-white/20 text-white flex items-center justify-center hover:bg-white hover:text-black transition-colors">
+            <Play className="w-7 h-7 fill-current ml-0.5" />
           </span>
         </button>
       )}
@@ -347,7 +347,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="relative h-4 flex items-center group/seek cursor-pointer mb-1">
           <div className="w-full h-1 group-hover/seek:h-1.5 bg-white/25 rounded-full overflow-hidden transition-all relative">
             <div className="absolute inset-y-0 left-0 bg-white/40" style={{ width: `${bufferedPct}%` }} />
-            <div className="absolute inset-y-0 left-0 bg-[#ff0033]" style={{ width: `${progressPct}%` }} />
+            <div className="absolute inset-y-0 left-0 bg-white" style={{ width: `${progressPct}%` }} />
           </div>
           <input
             type="range"
@@ -405,7 +405,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={() => setCaptionsOn((v) => !v)}
               aria-label="Toggle captions"
               title="Subtitles / Captions (C)"
-              className={`p-1.5 rounded-lg hover:bg-white/15 cursor-pointer ${captionsOn ? 'text-[#ff0033]' : ''}`}
+              className={`p-1.5 rounded-lg hover:bg-white/15 cursor-pointer ${captionsOn ? 'bg-white text-black' : ''}`}
             >
               <Captions className="w-5 h-5" />
             </button>
@@ -421,9 +421,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <Settings className="w-5 h-5" />
               </button>
               {settingsOpen && (
-                <div className="absolute right-0 bottom-10 w-52 rounded-xl bg-[#1c1c1c]/95 border border-white/15 p-3 shadow-2xl text-xs space-y-3 z-30">
+                <div className="absolute right-0 bottom-10 w-52 rounded-xl bg-[#16181c]/95 border border-[#2f3336] p-3 shadow-2xl text-xs space-y-3 z-30">
                   <div>
-                    <p className="text-white/60 mb-1.5 font-medium">Playback speed</p>
+                    <p className="text-[#71767b] mb-1.5 font-medium">Playback speed</p>
                     <div className="flex flex-wrap gap-1">
                       {[0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => (
                         <button
@@ -431,7 +431,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           type="button"
                           onClick={() => handleSpeedChange(s)}
                           className={`px-2 py-1 rounded cursor-pointer ${
-                            speed === s ? 'bg-[#ff0033] text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
+                            speed === s ? 'bg-white text-black font-bold' : 'bg-[#202327] hover:bg-[#2f3336]'
                           }`}
                         >
                           {s}x
@@ -440,7 +440,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </div>
                   <div>
-                    <p className="text-white/60 mb-1.5 font-medium">Quality</p>
+                    <p className="text-[#71767b] mb-1.5 font-medium">Quality</p>
                     <div className="flex flex-wrap gap-1">
                       {['Auto', '720p', '360p'].map((q) => (
                         <button
@@ -448,7 +448,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           type="button"
                           onClick={() => handleQualityChange(q)}
                           className={`px-2 py-1 rounded cursor-pointer ${
-                            quality === q ? 'bg-[#ff0033] text-white font-semibold' : 'bg-white/10 hover:bg-white/20'
+                            quality === q ? 'bg-white text-black font-bold' : 'bg-[#202327] hover:bg-[#2f3336]'
                           }`}
                         >
                           {q}

@@ -7,15 +7,8 @@ import { DATA_DIR, ensureMediaDirs } from './media.ts';
 ensureMediaDirs();
 
 const DB_PATH = path.join(DATA_DIR, 'doptube.db');
-export const db = new DatabaseSync(DB_PATH);
 
-try {
-  db.exec('PRAGMA journal_mode = WAL;');
-} catch {
-  // Serverless /tmp filesystems may not support WAL; fall back to default journal mode
-}
-
-db.exec(`
+const SCHEMA_SQL = `
   PRAGMA foreign_keys = ON;
 
   CREATE TABLE IF NOT EXISTS users (
@@ -25,6 +18,7 @@ db.exec(`
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL DEFAULT 'google_oauth',
     avatar_url TEXT NOT NULL DEFAULT '',
+    birthday TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT 'creator',
     preferred_language TEXT NOT NULL DEFAULT 'English',
     restricted_mode INTEGER NOT NULL DEFAULT 0,
@@ -348,7 +342,50 @@ db.exec(`
     added_at TEXT NOT NULL,
     PRIMARY KEY (user_id, track_id)
   );
-`);
+`;
+
+function removeDbArtifacts(dbFile: string) {
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      const target = `${dbFile}${suffix}`;
+      if (fs.existsSync(target)) fs.unlinkSync(target);
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+}
+
+function initDatabaseInstance(dbFile: string): DatabaseSync {
+  const instance = new DatabaseSync(dbFile);
+  try {
+    instance.exec('PRAGMA journal_mode = WAL;');
+  } catch {
+    // Serverless /tmp filesystems may not support WAL; fall back to default journal mode
+  }
+  instance.exec(SCHEMA_SQL);
+  instance.prepare(`SELECT COUNT(*) as c FROM users`).get();
+  return instance;
+}
+
+function openAndInitDb(): DatabaseSync {
+  try {
+    return initDatabaseInstance(DB_PATH);
+  } catch (err) {
+    console.warn('SQLite primary open failed, recreating clean DB:', err instanceof Error ? err.message : err);
+    removeDbArtifacts(DB_PATH);
+    try {
+      return initDatabaseInstance(DB_PATH);
+    } catch {
+      const fallbackDir = '/tmp/doptube-data';
+      if (!fs.existsSync(fallbackDir)) fs.mkdirSync(fallbackDir, { recursive: true });
+      const fallbackPath = path.join(fallbackDir, 'doptube.db');
+      removeDbArtifacts(fallbackPath);
+      return initDatabaseInstance(fallbackPath);
+    }
+  }
+}
+
+export const db = openAndInitDb();
 
 // Safe column migration for existing SQLite files
 try {
@@ -356,6 +393,9 @@ try {
   if (!cols.some((c) => c.name === 'firebase_uid')) {
     db.exec(`ALTER TABLE users ADD COLUMN firebase_uid TEXT`);
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid)`);
+  }
+  if (!cols.some((c) => c.name === 'birthday')) {
+    db.exec(`ALTER TABLE users ADD COLUMN birthday TEXT NOT NULL DEFAULT ''`);
   }
 } catch {
   // ignore migration error if already present

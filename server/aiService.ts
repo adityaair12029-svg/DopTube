@@ -104,8 +104,8 @@ export function hydrateVideoRow(r: VideoDbRow): HydratedVideoRow {
       ? {
           externalEmbedUrl:
             r.is_short === 1
-              ? `https://www.youtube.com/embed/${extRef}?autoplay=1&playsinline=1&loop=1&playlist=${extRef}&rel=0&modestbranding=1`
-              : `https://www.youtube.com/embed/${extRef}?autoplay=1&playsinline=1&rel=0&modestbranding=1`,
+              ? `https://www.youtube-nocookie.com/embed/${extRef}?autoplay=1&playsinline=1&loop=1&playlist=${extRef}&rel=0&modestbranding=1&iv_load_policy=3`
+              : `https://www.youtube-nocookie.com/embed/${extRef}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`,
         }
       : {}),
     isShort: r.is_short === 1,

@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -81,6 +81,10 @@ export async function signOutFirebase(): Promise<void> {
   } catch {
     // ignore signout error if not signed into firebase
   }
+}
+
+export function onFirebaseAuthState(cb: (user: FirebaseUser | null) => void): () => void {
+  return onAuthStateChanged(auth, cb);
 }
 
 export async function syncUserProfileToFirestore(params: {

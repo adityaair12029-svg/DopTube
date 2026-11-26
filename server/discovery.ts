@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { parseIsoDurationToSeconds, type RankableVideo } from './domain.ts';
 
 export interface DiscoveryResult extends RankableVideo {
@@ -33,6 +34,79 @@ interface CacheEntry<T> {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const apiCache = new Map<string, CacheEntry<unknown>>();
+const refererStore = new AsyncLocalStorage<string>();
+
+export interface DiscoveryIssue {
+  code: string;
+  status?: number;
+  message: string;
+  at: string;
+}
+
+let lastDiscoveryIssue: DiscoveryIssue | null = null;
+
+export function runWithDiscoveryReferer<T>(referer: string, fn: () => T): T {
+  return refererStore.run(referer, fn);
+}
+
+export function getExternalApiKey(): string {
+  return (
+    process.env.EXTERNAL_VIDEO_API_KEY ||
+    process.env.YOUTUBE_API_KEY ||
+    process.env.YOUTUBE_DATA_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.VITE_EXTERNAL_VIDEO_API_KEY ||
+    process.env.VITE_YOUTUBE_API_KEY ||
+    ''
+  ).trim();
+}
+
+export function getDiscoveryStatus() {
+  const configured = Boolean(getExternalApiKey());
+  return {
+    configured,
+    issue: configured ? lastDiscoveryIssue : { code: 'missing_api_key', message: 'External video discovery API key is not configured on the server.', at: new Date().toISOString() },
+  };
+}
+
+function getEffectiveReferer(): string {
+  const ctxRef = refererStore.getStore();
+  if (ctxRef && ctxRef.startsWith('http')) return ctxRef;
+  if (process.env.APP_URL && process.env.APP_URL.startsWith('http')) return process.env.APP_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/`;
+  return 'https://doobtube.vercel.app/';
+}
+
+async function discoveryFetch(url: string, timeoutMs = 6500): Promise<Response> {
+  const resp = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      Referer: getEffectiveReferer(),
+    },
+  });
+  if (!resp.ok) {
+    let reason = `HTTP ${resp.status}`;
+    try {
+      const cloneText = await resp.clone().text();
+      const parsed = JSON.parse(cloneText) as { error?: { message?: string; errors?: Array<{ reason?: string }> } };
+      const apiMsg = parsed?.error?.message || cloneText.slice(0, 140);
+      const apiReason = parsed?.error?.errors?.[0]?.reason;
+      reason = apiReason ? `${apiReason}: ${apiMsg}` : apiMsg;
+    } catch {
+      // ignore body parse failure
+    }
+    lastDiscoveryIssue = {
+      code: resp.status === 403 ? 'api_forbidden' : resp.status === 429 ? 'quota_exceeded' : 'api_error',
+      status: resp.status,
+      message: reason,
+      at: new Date().toISOString(),
+    };
+    console.warn(`External discovery error (${resp.status}):`, reason);
+  } else {
+    lastDiscoveryIssue = null;
+  }
+  return resp;
+}
 
 function getCached<T>(key: string): T | null {
   const entry = apiCache.get(key);
@@ -54,15 +128,6 @@ function setCached<T>(key: string, value: T): T {
   }
   apiCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
   return value;
-}
-
-export function getExternalApiKey(): string {
-  return (
-    process.env.EXTERNAL_VIDEO_API_KEY ||
-    process.env.YOUTUBE_API_KEY ||
-    process.env.YOUTUBE_DATA_API_KEY ||
-    ''
-  ).trim();
 }
 
 interface RawVideoItem {
@@ -173,7 +238,7 @@ async function fetchChannelsMap(channelIds: string[], apiKey: string): Promise<M
 
   try {
     const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${encodeURIComponent(missing.join(','))}&key=${encodeURIComponent(apiKey)}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const resp = await discoveryFetch(url, 6000);
     if (!resp.ok) return result;
     const json = (await resp.json()) as { items?: RawChannelItem[] };
     for (const ch of json.items ?? []) {
@@ -263,8 +328,8 @@ function toDiscoveryResult(
     hlsUrl: null,
     sourceType: 'external',
     externalEmbedUrl: isShort
-      ? `https://www.youtube.com/embed/${vid}?autoplay=1&playsinline=1&loop=1&playlist=${vid}&rel=0&modestbranding=1`
-      : `https://www.youtube.com/embed/${vid}?autoplay=1&playsinline=1&rel=0&modestbranding=1`,
+      ? `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&playsinline=1&loop=1&playlist=${vid}&rel=0&modestbranding=1&iv_load_policy=3`
+      : `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`,
   };
 }
 
@@ -278,9 +343,8 @@ async function enrichVideoIds(
 
   try {
     const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&id=${encodeURIComponent(uniqueIds.join(','))}&key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(7000) });
+    const response = await discoveryFetch(url, 7000);
     if (!response.ok) {
-      console.warn(`External discovery videos API responded with ${response.status}`);
       return [];
     }
     const data = (await response.json()) as { items?: RawVideoItem[] };
@@ -330,9 +394,8 @@ export async function fetchExternalFeedPaged(params: {
         `India ${language !== 'All' ? language : ''} ${category !== 'All' ? category : ''} #shorts`.trim()
       );
       const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=short&regionCode=IN&maxResults=20${tokenParam}&q=${q}&key=${encodeURIComponent(apiKey)}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(6500) });
+      const resp = await discoveryFetch(url, 6500);
       if (!resp.ok) {
-        console.warn(`External discovery shorts API responded with ${resp.status}`);
         return { items: [], nextPageToken: null };
       }
       const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
@@ -350,9 +413,8 @@ export async function fetchExternalFeedPaged(params: {
 
     if (category === 'All' && language === 'All') {
       const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&chart=mostPopular&regionCode=IN&maxResults=24${tokenParam}&key=${encodeURIComponent(apiKey)}`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(6500) });
+      const resp = await discoveryFetch(url, 6500);
       if (!resp.ok) {
-        console.warn(`External discovery chart API responded with ${resp.status}`);
         return { items: [], nextPageToken: null };
       }
       const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
@@ -383,9 +445,8 @@ export async function fetchExternalFeedPaged(params: {
       .join(' ');
     const eventTypeParam = category === 'Live' ? '&eventType=live' : '';
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=24${eventTypeParam}${tokenParam}&q=${encodeURIComponent(searchQuery)}&key=${encodeURIComponent(apiKey)}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6500) });
+    const resp = await discoveryFetch(url, 6500);
     if (!resp.ok) {
-      console.warn(`External discovery category search responded with ${resp.status}`);
       return { items: [], nextPageToken: null };
     }
     const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
@@ -434,7 +495,7 @@ export async function fetchExternalDiscoveryPaged(
     const q = encodeURIComponent(language && language !== 'All' ? `${query} ${language}` : query);
     const tokenParam = cleanToken ? `&pageToken=${encodeURIComponent(cleanToken)}` : '';
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=24${tokenParam}&q=${q}&key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(6500) });
+    const response = await discoveryFetch(url, 6500);
     if (!response.ok) return { items: [], nextPageToken: null };
     const data = (await response.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
     const ids = (data.items ?? [])
@@ -537,7 +598,7 @@ export async function fetchExternalChannelById(
 
     if (uploadsPlaylistId) {
       const playlistUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${encodeURIComponent(uploadsPlaylistId)}&maxResults=50${tokenParam}&key=${encodeURIComponent(apiKey)}`;
-      const plResp = await fetch(playlistUrl, { signal: AbortSignal.timeout(7000) });
+      const plResp = await discoveryFetch(playlistUrl, 7000);
       if (plResp.ok) {
         const plData = (await plResp.json()) as {
           items?: RawPlaylistItem[];
@@ -556,7 +617,7 @@ export async function fetchExternalChannelById(
 
     if (ids.length === 0 && !uploadsPlaylistId) {
       const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&channelId=${encodeURIComponent(rawChannelId)}&maxResults=50${tokenParam}&key=${encodeURIComponent(apiKey)}`;
-      const resp = await fetch(searchUrl, { signal: AbortSignal.timeout(6500) });
+      const resp = await discoveryFetch(searchUrl, 6500);
       const data = resp.ok
         ? ((await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string; pageInfo?: { totalResults?: number } })
         : { items: [] };

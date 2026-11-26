@@ -12,7 +12,7 @@ import {
 } from './aiService.ts';
 import { rateLimit, requireAdmin, requireAuth, type AuthedRequest } from './auth.ts';
 import { db } from './db.ts';
-import { fetchExternalFeedPaged, fetchExternalVideoById, type DiscoveryResult } from './discovery.ts';
+import { fetchExternalFeedPaged, fetchExternalVideoById, getDiscoveryStatus, type DiscoveryResult } from './discovery.ts';
 import { filterAndSortVideos, INDIAN_LANGUAGES } from './domain.ts';
 import {
   buildConditionalSections,
@@ -34,12 +34,69 @@ export function registerAiAndLibraryRoutes(
   // =========================================================================
 
   const handleHomeFeed = async (req: AuthedRequest, res: Express['response'] | any) => {
-    const { category = 'All', language = 'All', shorts = '0', pageToken = '' } = req.query as Record<string, string | undefined>;
+    const {
+      category = 'All',
+      language = 'All',
+      shorts = '0',
+      pageToken = '',
+      feedFilter = 'for_you',
+    } = req.query as Record<string, string | undefined>;
     const cursor = Math.max(0, Number(req.query.cursor || 0));
     const limit = Math.max(1, Math.min(30, Number(req.query.limit || 12)));
     const cleanToken = (pageToken || '').trim();
 
     const ctx = buildUserAiContext(req.auth?.userId);
+
+    if (feedFilter === 'following') {
+      if (!req.auth) {
+        res.json({
+          videos: [],
+          sections: [],
+          nextCursor: null,
+          nextPageToken: null,
+          hasMore: false,
+          total: 0,
+          followingRequiresAuth: true,
+          discoveryStatus: getDiscoveryStatus(),
+        });
+        return;
+      }
+
+      const subRows = db
+        .prepare(`
+          SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
+                 c.verified as channel_verified, c.subscriber_count
+          FROM videos v
+          JOIN channels c ON c.id = v.channel_id
+          JOIN subscriptions s ON s.channel_id = c.id
+          WHERE s.user_id = ? AND v.visibility = 'public' AND v.status = 'published'
+          ORDER BY v.created_at DESC
+        `)
+        .all(req.auth.userId) as unknown as VideoDbRow[];
+
+      const hydrated = subRows
+        .map(hydrateVideoRow)
+        .filter((v) => (shorts === '1' ? v.isShort : !v.isShort));
+      const filtered = filterAndSortVideos(hydrated, { category, language });
+      const valid = filtered
+        .map(toCandidate)
+        .filter((v) => validateContentCandidate(v, ctx.validation).valid);
+      const slice = valid.slice(cursor, cursor + limit);
+      const nextCursor = cursor + slice.length < valid.length ? cursor + slice.length : null;
+
+      res.json({
+        videos: slice,
+        sections: [],
+        nextCursor,
+        nextPageToken: null,
+        hasMore: nextCursor !== null,
+        total: valid.length,
+        followingEmpty: valid.length === 0,
+        discoveryStatus: getDiscoveryStatus(),
+      });
+      return;
+    }
+
     const native =
       cleanToken === ''
         ? filterAndSortVideos(
@@ -125,6 +182,7 @@ export function registerAiAndLibraryRoutes(
       nextPageToken: respNextPageToken || null,
       hasMore: respHasMore,
       total: rec.total,
+      discoveryStatus: getDiscoveryStatus(),
     });
   };
 
@@ -148,6 +206,7 @@ export function registerAiAndLibraryRoutes(
       videos: ranked,
       nextPageToken: extPaged.nextPageToken,
       hasMore: Boolean(extPaged.nextPageToken),
+      discoveryStatus: getDiscoveryStatus(),
     });
   });
 
@@ -168,6 +227,7 @@ export function registerAiAndLibraryRoutes(
       videos: ranked,
       nextPageToken: extPaged.nextPageToken,
       hasMore: Boolean(extPaged.nextPageToken),
+      discoveryStatus: getDiscoveryStatus(),
     });
   });
 

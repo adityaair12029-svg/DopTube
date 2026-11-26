@@ -288,12 +288,12 @@ export const WatchView: React.FC<WatchViewProps> = ({
     return (
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
         <div className="lg:col-span-2 space-y-4">
-          <div className="aspect-video rounded-xl bg-neutral-200 dark:bg-[#222222]" />
-          <div className="h-6 bg-neutral-200 dark:bg-[#222222] rounded w-3/4" />
+          <div className="aspect-video rounded-xl bg-[#eff3f4] dark:bg-[#16181c]" />
+          <div className="h-6 bg-[#eff3f4] dark:bg-[#16181c] rounded w-3/4" />
         </div>
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-24 rounded-xl bg-neutral-200 dark:bg-[#222222]" />
+            <div key={i} className="h-24 rounded-xl bg-[#eff3f4] dark:bg-[#16181c]" />
           ))}
         </div>
       </div>
@@ -303,14 +303,14 @@ export const WatchView: React.FC<WatchViewProps> = ({
   if (!video) {
     return (
       <div className="py-20 text-center px-4">
-        <p className="text-lg font-semibold">Video unavailable</p>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-1">
+        <p className="text-lg font-bold">Video unavailable</p>
+        <p className="text-sm text-[#536471] dark:text-[#71767b] mt-1">
           This video may have been removed, set to private, or temporarily failed to load.
         </p>
         <button
           type="button"
           onClick={() => onWatch(videoId)}
-          className="mt-4 h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-xs font-semibold cursor-pointer"
+          className="mt-4 h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-bold cursor-pointer"
         >
           Retry
         </button>
@@ -338,9 +338,9 @@ export const WatchView: React.FC<WatchViewProps> = ({
 
       {/* 5-Second Autoplay Next Video Countdown Overlay */}
       {nextUp && (
-        <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:rounded-xl">
-          <div className="w-full max-w-sm rounded-2xl bg-[#1a1a1a] text-white border border-white/15 p-4 space-y-3 shadow-2xl">
-            <p className="text-xs font-bold tracking-wider text-[#ff0033] font-mono-nums">
+        <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 sm:rounded-xl">
+          <div className="w-full max-w-sm rounded-2xl bg-[#16181c] text-white border border-[#2f3336] p-4 space-y-3 shadow-2xl">
+            <p className="text-xs font-bold tracking-wider text-white font-mono-nums">
               NEXT VIDEO IN {nextUp.countdown}
             </p>
             <div className="flex items-center gap-3">
@@ -352,14 +352,14 @@ export const WatchView: React.FC<WatchViewProps> = ({
               />
               <div className="min-w-0">
                 <p className="text-sm font-semibold line-clamp-2">{nextUp.video.title}</p>
-                <p className="text-xs text-white/60 truncate mt-0.5">{nextUp.video.channelName}</p>
+                <p className="text-xs text-[#71767b] truncate mt-0.5">{nextUp.video.channelName}</p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setNextUp(null)}
-                className="h-8 px-4 rounded-full bg-white/15 hover:bg-white/25 text-xs font-semibold cursor-pointer"
+                className="h-8 px-4 rounded-full bg-[#202327] hover:bg-[#2f3336] text-xs font-semibold cursor-pointer"
               >
                 Cancel
               </button>
@@ -370,7 +370,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                   setNextUp(null);
                   onWatch(target.id, target);
                 }}
-                className="h-8 px-4 rounded-full bg-white text-[#0f0f0f] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                className="h-8 px-4 rounded-full bg-white text-black text-xs font-bold flex items-center gap-1.5 cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
                 Play now
@@ -392,7 +392,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
           {!theaterMode && playerNode}
 
           <div className="px-3 sm:px-0">
-            <h1 className="mt-3.5 text-[18px] sm:text-[20px] font-bold leading-snug text-[#0f0f0f] dark:text-[#f1f1f1]">
+            <h1 className="mt-3.5 text-[18px] sm:text-[20px] font-bold leading-snug text-[#0f1419] dark:text-[#e7e9ea]">
               {video.title}
             </h1>
 
@@ -402,7 +402,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenChannel(video.channelId)}
-                  className="w-10 h-10 rounded-full overflow-hidden shrink-0 cursor-pointer"
+                  className="w-10 h-10 rounded-full overflow-hidden shrink-0 cursor-pointer border border-[#e5e7eb] dark:border-[#2f3336]"
                 >
                   <img
                     src={video.channelAvatar}
@@ -420,17 +420,17 @@ export const WatchView: React.FC<WatchViewProps> = ({
                     <span className="truncate">{video.channelName}</span>
                     {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
                   </button>
-                  <p className="text-xs text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+                  <p className="text-xs text-[#536471] dark:text-[#71767b] font-mono-nums">
                     {formatViews(video.subscriberCount)} subscribers
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={handleSubscribe}
-                  className={`h-9 px-4 rounded-full text-sm font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  className={`h-9 px-4 rounded-full text-sm font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     video.isSubscribed
-                      ? 'bg-neutral-200 dark:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-neutral-300 dark:hover:bg-[#3f3f3f]'
-                      : 'bg-[#0f0f0f] dark:bg-[#f1f1f1] text-white dark:text-[#0f0f0f] hover:opacity-90'
+                      ? 'bg-[#eff3f4] dark:bg-[#202327] text-[#0f1419] dark:text-[#e7e9ea] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336]'
+                      : 'bg-[#0f1419] dark:bg-white text-white dark:text-black hover:opacity-90'
                   }`}
                 >
                   {video.isSubscribed ? 'Subscribed' : 'Subscribe'}
@@ -439,24 +439,24 @@ export const WatchView: React.FC<WatchViewProps> = ({
 
               <div className="flex flex-wrap items-center gap-2">
                 {/* Like / Dislike Pill */}
-                <div className="inline-flex items-center h-9 rounded-full bg-neutral-100 dark:bg-[#272727] overflow-hidden">
+                <div className="inline-flex items-center h-9 rounded-full bg-[#eff3f4] dark:bg-[#202327] border border-[#e5e7eb] dark:border-[#2f3336] overflow-hidden">
                   <button
                     type="button"
                     onClick={() => handleReact('like')}
-                    className={`h-full px-3.5 flex items-center gap-2 text-sm font-medium hover:bg-neutral-200 dark:hover:bg-[#3f3f3f] cursor-pointer ${
-                      video.userReaction === 'like' ? 'text-[#065fd4] dark:text-[#3ea6ff]' : ''
+                    className={`h-full px-3.5 flex items-center gap-2 text-sm font-medium hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] cursor-pointer ${
+                      video.userReaction === 'like' ? 'font-bold text-[#0f1419] dark:text-white' : ''
                     }`}
                   >
                     <ThumbsUp className={`w-4 h-4 ${video.userReaction === 'like' ? 'fill-current' : ''}`} />
                     <span className="font-mono-nums">{formatViews(video.likes)}</span>
                   </button>
-                  <span className="w-px h-5 bg-neutral-300 dark:bg-[#444]" />
+                  <span className="w-px h-5 bg-[#d0d7de] dark:bg-[#2f3336]" />
                   <button
                     type="button"
                     onClick={() => handleReact('dislike')}
                     aria-label="Dislike"
-                    className={`h-full px-3 flex items-center hover:bg-neutral-200 dark:hover:bg-[#3f3f3f] cursor-pointer ${
-                      video.userReaction === 'dislike' ? 'text-[#ff0033]' : ''
+                    className={`h-full px-3 flex items-center hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] cursor-pointer ${
+                      video.userReaction === 'dislike' ? 'font-bold text-[#0f1419] dark:text-white' : ''
                     }`}
                   >
                     <ThumbsDown className={`w-4 h-4 ${video.userReaction === 'dislike' ? 'fill-current' : ''}`} />
@@ -472,7 +472,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                     }).catch(() => {});
                     onShare(video);
                   }}
-                  className="h-9 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3f3f3f] text-sm font-medium flex items-center gap-1.5 cursor-pointer"
+                  className="h-9 px-3.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-sm font-medium flex items-center gap-1.5 cursor-pointer"
                 >
                   <Share2 className="w-4 h-4" />
                   <span>Share</span>
@@ -483,8 +483,8 @@ export const WatchView: React.FC<WatchViewProps> = ({
                   onClick={handleWatchLater}
                   className={`h-9 px-3.5 rounded-full text-sm font-medium flex items-center gap-1.5 cursor-pointer ${
                     video.inWatchLater
-                      ? 'bg-[#3ea6ff]/20 text-[#065fd4] dark:text-[#3ea6ff]'
-                      : 'bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3f3f3f]'
+                      ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black font-bold'
+                      : 'bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336]'
                   }`}
                 >
                   <Clock className="w-4 h-4" />
@@ -494,7 +494,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                 <button
                   type="button"
                   onClick={() => (user ? onSavePlaylist(video.id) : onOpenAuth())}
-                  className="h-9 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3f3f3f] text-sm font-medium flex items-center gap-1.5 cursor-pointer"
+                  className="h-9 px-3.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-sm font-medium flex items-center gap-1.5 cursor-pointer"
                 >
                   <ListPlus className="w-4 h-4" />
                   <span>Save</span>
@@ -504,7 +504,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                   type="button"
                   onClick={() => onReport(video)}
                   aria-label="Report video"
-                  className="h-9 px-3 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3f3f3f] text-sm font-medium flex items-center gap-1.5 cursor-pointer"
+                  className="h-9 px-3 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-sm font-medium flex items-center gap-1.5 cursor-pointer"
                 >
                   <Flag className="w-4 h-4" />
                   <span className="hidden sm:inline">Report</span>
@@ -513,7 +513,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
             </div>
 
             {/* Expandable Description Box */}
-            <div className="mt-4 p-3.5 rounded-xl bg-neutral-100 dark:bg-[#272727] text-sm">
+            <div className="mt-4 p-3.5 rounded-xl bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm">
               <div className="flex flex-wrap items-center gap-2 font-semibold text-[13px] font-mono-nums mb-1.5">
                 <span>{formatViews(video.views)} views</span>
                 <span>·</span>
@@ -523,11 +523,11 @@ export const WatchView: React.FC<WatchViewProps> = ({
                 <span>·</span>
                 <span>{video.language}</span>
               </div>
-              <p className={`whitespace-pre-line text-[#0f0f0f] dark:text-[#f1f1f1] ${descExpanded ? '' : 'line-clamp-2'}`}>
+              <p className={`whitespace-pre-line text-[#0f1419] dark:text-[#e7e9ea] ${descExpanded ? '' : 'line-clamp-2'}`}>
                 {video.description || 'Streaming on DopTube India.'}
               </p>
               {video.tags.length > 0 && descExpanded && (
-                <p className="mt-2.5 text-xs text-[#065fd4] dark:text-[#3ea6ff] flex flex-wrap gap-2">
+                <p className="mt-2.5 text-xs text-[#536471] dark:text-[#71767b] flex flex-wrap gap-2">
                   {video.tags.map((tag) => (
                     <span key={tag}>#{tag.replace(/\s+/g, '')}</span>
                   ))}
@@ -547,7 +547,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
               <h2 className="text-lg font-bold mb-4 font-mono-nums">{comments.length} Comments</h2>
 
               <form onSubmit={submitComment} className="flex items-start gap-3 mb-6">
-                <div className="w-10 h-10 rounded-full bg-neutral-200 dark:bg-[#272727] overflow-hidden shrink-0 flex items-center justify-center text-sm font-bold">
+                <div className="w-10 h-10 rounded-full bg-[#eff3f4] dark:bg-[#16181c] overflow-hidden shrink-0 flex items-center justify-center text-sm font-bold">
                   {user ? (
                     <img src={user.avatarUrl} alt={user.name} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                   ) : (
@@ -563,20 +563,20 @@ export const WatchView: React.FC<WatchViewProps> = ({
                     }}
                     onChange={(e) => setCommentBody(e.target.value)}
                     placeholder="Add a comment..."
-                    className="w-full pb-2 bg-transparent border-b border-neutral-300 dark:border-[#3e3e3e] focus:border-[#0f0f0f] dark:focus:border-white text-sm focus:outline-none"
+                    className="w-full pb-2 bg-transparent border-b border-[#e5e7eb] dark:border-[#2f3336] focus:border-[#0f1419] dark:focus:border-white text-sm focus:outline-none"
                   />
                   {commentBody.trim() && (
                     <div className="mt-2 flex justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => setCommentBody('')}
-                        className="h-8 px-3.5 rounded-full text-xs font-medium hover:bg-neutral-200 dark:hover:bg-[#272727] cursor-pointer"
+                        className="h-8 px-3.5 rounded-full text-xs font-medium hover:bg-[#eff3f4] dark:hover:bg-[#16181c] cursor-pointer"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="h-8 px-4 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-xs font-semibold cursor-pointer"
+                        className="h-8 px-4 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-bold cursor-pointer"
                       >
                         Comment
                       </button>
@@ -596,17 +596,17 @@ export const WatchView: React.FC<WatchViewProps> = ({
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-xs">
-                        <span className="font-semibold text-[#0f0f0f] dark:text-[#f1f1f1]">
+                        <span className="font-semibold text-[#0f1419] dark:text-[#e7e9ea]">
                           {c.authorHandle || c.authorName}
                         </span>
-                        <span className="text-[#606060] dark:text-[#aaaaaa]">{formatRelativeTime(c.createdAt)}</span>
+                        <span className="text-[#536471] dark:text-[#71767b]">{formatRelativeTime(c.createdAt)}</span>
                       </div>
                       <p className="mt-1 text-sm leading-relaxed">{c.body}</p>
                       <div className="mt-1.5 flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => setReplyTargetId(replyTargetId === c.id ? null : c.id)}
-                          className="text-xs font-semibold text-[#606060] dark:text-[#aaaaaa] hover:text-[#0f0f0f] dark:hover:text-white cursor-pointer"
+                          className="text-xs font-semibold text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white cursor-pointer"
                         >
                           Reply
                         </button>
@@ -619,12 +619,12 @@ export const WatchView: React.FC<WatchViewProps> = ({
                             value={replyBody}
                             onChange={(e) => setReplyBody(e.target.value)}
                             placeholder="Add a reply..."
-                            className="flex-1 pb-1 bg-transparent border-b border-neutral-300 dark:border-[#3e3e3e] text-sm focus:outline-none"
+                            className="flex-1 pb-1 bg-transparent border-b border-[#e5e7eb] dark:border-[#2f3336] text-sm focus:outline-none"
                           />
                           <button
                             type="button"
                             onClick={() => submitReply(c.id)}
-                            className="h-7 px-3 rounded-full bg-[#3ea6ff] text-[#0f0f0f] text-xs font-semibold cursor-pointer"
+                            className="h-7 px-3 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-bold cursor-pointer"
                           >
                             Reply
                           </button>
@@ -632,7 +632,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                       )}
 
                       {c.replies.length > 0 && (
-                        <div className="mt-3 space-y-3 pl-2 border-l border-neutral-200 dark:border-[#303030]">
+                        <div className="mt-3 space-y-3 pl-2 border-l border-[#e5e7eb] dark:border-[#2f3336]">
                           {c.replies.map((r) => (
                             <div key={r.id} className="flex items-start gap-2.5">
                               <img
@@ -644,7 +644,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
                               <div>
                                 <div className="flex items-center gap-2 text-xs">
                                   <span className="font-semibold">{r.authorHandle || r.authorName}</span>
-                                  <span className="text-[#606060] dark:text-[#aaaaaa]">{formatRelativeTime(r.createdAt)}</span>
+                                  <span className="text-[#536471] dark:text-[#71767b]">{formatRelativeTime(r.createdAt)}</span>
                                 </div>
                                 <p className="text-sm mt-0.5">{r.body}</p>
                               </div>
@@ -663,17 +663,17 @@ export const WatchView: React.FC<WatchViewProps> = ({
         {/* Up Next / Queue / Related Videos Column */}
         <aside className="lg:col-span-4 px-3 sm:px-0 space-y-4">
           {/* Autoplay & Mode Controls */}
-          <div className="p-3.5 rounded-xl bg-neutral-100 dark:bg-[#1f1f1f] space-y-2.5">
+          <div className="p-3.5 rounded-xl bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold">Up next on DopTube</span>
               <button
                 type="button"
                 onClick={onToggleAutoplay}
                 aria-pressed={autoplayEnabled}
-                className={`h-7 px-3 rounded-full text-xs font-semibold cursor-pointer transition-colors ${
+                className={`h-7 px-3 rounded-full text-xs font-bold cursor-pointer transition-colors ${
                   autoplayEnabled
-                    ? 'bg-[#ff0033] text-white'
-                    : 'bg-neutral-200 dark:bg-[#333] text-[#606060] dark:text-[#aaaaaa]'
+                    ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                    : 'bg-white dark:bg-[#202327] text-[#536471] dark:text-[#71767b]'
                 }`}
               >
                 Autoplay: {autoplayEnabled ? 'On' : 'Off'}
@@ -692,10 +692,10 @@ export const WatchView: React.FC<WatchViewProps> = ({
                   key={m}
                   type="button"
                   onClick={() => onChangeAutoplayMode(m)}
-                  className={`h-7 px-2.5 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer ${
+                  className={`h-7 px-2.5 rounded-full text-xs font-semibold flex items-center gap-1 cursor-pointer ${
                     autoplayMode === m
-                      ? 'bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f]'
-                      : 'bg-white dark:bg-[#2a2a2a]'
+                      ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                      : 'bg-white dark:bg-[#202327] text-[#536471] dark:text-[#e7e9ea]'
                   }`}
                 >
                   {m === 'repeat' && <Repeat className="w-3 h-3" />}
@@ -708,7 +708,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
 
           {/* Active Queue Panel */}
           {queue.length > 0 && (
-            <div className="p-3.5 rounded-xl border border-neutral-200 dark:border-[#303030] space-y-2.5">
+            <div className="p-3.5 rounded-xl border border-[#e5e7eb] dark:border-[#2f3336] space-y-2.5">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-[#606060] dark:text-[#aaaaaa]">
                   Queue ({queue.length})
@@ -783,10 +783,10 @@ export const WatchView: React.FC<WatchViewProps> = ({
                 key={val}
                 type="button"
                 onClick={() => setRelatedFilter(val)}
-                className={`h-8 px-3 rounded-lg text-xs font-medium truncate max-w-[160px] cursor-pointer ${
+                className={`h-8 px-3.5 rounded-full text-xs font-semibold truncate max-w-[160px] cursor-pointer ${
                   relatedFilter === val
-                    ? 'bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f]'
-                    : 'bg-neutral-100 dark:bg-[#272727]'
+                    ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                    : 'bg-[#eff3f4] dark:bg-[#202327] text-[#0f1419] dark:text-[#e7e9ea]'
                 }`}
               >
                 {label}

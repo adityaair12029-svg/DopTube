@@ -3,124 +3,8 @@ import { Check, Copy, FileVideo, ImagePlus, Mic, Plus, ShieldAlert, Sparkles, Up
 import type { PlaylistItem, UserProfile, VideoItem } from '../types';
 import { apiFetch, uploadWithProgress } from '../lib/api';
 import { ALL_CATEGORIES, INDIAN_LANGUAGES } from '../lib/format';
-import { signInWithGooglePopup, syncUserProfileToFirestore } from '../firebase';
-import { DopTubeLogo } from './DopTubeLogo';
 
-export const AuthModal: React.FC<{
-  open: boolean;
-  theme: 'dark' | 'light';
-  onClose: () => void;
-  onSuccess: (user: UserProfile) => void;
-}> = ({ open, theme, onClose, onSuccess }) => {
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  if (!open) return null;
-
-  const handleGoogleSignIn = async () => {
-    setError('');
-    setLoading(true);
-    try {
-      const { idToken } = await signInWithGooglePopup();
-      const res = await apiFetch<{ user: UserProfile }>('/api/auth/google', {
-        method: 'POST',
-        body: JSON.stringify({ idToken }),
-      });
-
-      void syncUserProfileToFirestore({
-        displayName: res.user.name,
-        handle: res.user.channel?.handle || `@${res.user.name.toLowerCase().replace(/[^a-z0-9]/g, '') || 'creator'}`,
-        avatarUrl: res.user.avatarUrl,
-        email: res.user.email,
-        preferredLanguage: res.user.preferredLanguage || 'English',
-        historyPaused: res.user.historyPaused,
-        personalizationEnabled: res.user.preferences?.personalizationEnabled ?? true,
-        restrictedMode: res.user.restrictedMode,
-        theme,
-        selectedInterests: res.user.preferences?.selectedInterests ?? [],
-      }).catch(() => {});
-
-      onSuccess(res.user);
-      onClose();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Google Sign-In failed.';
-      setError(
-        message.includes('popup-closed-by-user')
-          ? 'Sign-in was cancelled. Click Continue with Google to try again.'
-          : message
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="auth-modal-title"
-        className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] shadow-2xl p-6 relative"
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close sign in dialog"
-          className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-        </button>
-
-        <div className="mb-6">
-          <DopTubeLogo />
-          <h2 id="auth-modal-title" className="mt-4 text-xl font-bold">
-            Sign in to DopTube
-          </h2>
-          <p className="mt-1 text-sm text-[#606060] dark:text-[#aaaaaa]">
-            Use your verified Google account to access your channel, playlists, personalized AI feed, and DopTube Studio.
-          </p>
-        </div>
-
-        {error && (
-          <div className="mb-4 px-3.5 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-sm">
-            {error}
-          </div>
-        )}
-
-        <button
-          type="button"
-          disabled={loading}
-          onClick={handleGoogleSignIn}
-          className="w-full h-11 px-4 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] hover:opacity-90 font-semibold text-sm flex items-center justify-center gap-3 transition-opacity disabled:opacity-60 cursor-pointer shadow-sm"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              fill="#4285F4"
-              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.08.72-2.46 1.15-4.22 1.15-3.25 0-6.01-2.2-7-5.16H1.01v3.14C3.05 21.17 7.21 24 12 24Z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5 14.01c-.25-.72-.39-1.49-.39-2.29s.14-1.57.39-2.29V6.29H1.01A11.996 11.996 0 0 0 0 11.72c0 1.94.46 3.77 1.01 5.43l3.99-3.14Z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 4.75c1.8 0 3.41.62 4.68 1.84l3.51-3.51C18.07 1.19 15.3 0 12 0 7.21 0 3.05 2.83 1.01 6.87l3.99 3.14c.99-2.96 3.75-5.26 7-5.26Z"
-            />
-          </svg>
-          <span>{loading ? 'Connecting to Google...' : 'Continue with Google'}</span>
-        </button>
-
-        <p className="mt-4 text-xs text-center text-[#606060] dark:text-[#aaaaaa] leading-relaxed">
-          Your Google profile creates or connects your DopTube channel automatically.
-        </p>
-      </div>
-    </div>
-  );
-};
+export { XAuthModal as AuthModal } from './XAuthModal';
 
 export const OnboardingModal: React.FC<{
   open: boolean;
@@ -176,15 +60,15 @@ export const OnboardingModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 shadow-2xl space-y-5">
+      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-6 shadow-2xl space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#ff0033] mb-1">
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0f1419] dark:text-white mb-1">
               <Sparkles className="w-4 h-4" />
               <span>DopTube AI Personalization</span>
             </div>
             <h2 className="text-xl font-bold">Customize your Indian feed</h2>
-            <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-0.5">
+            <p className="text-sm text-[#536471] dark:text-[#71767b] mt-0.5">
               Pick your preferred language and topics so DopTube starts recommending relevant videos immediately.
             </p>
           </div>
@@ -192,7 +76,7 @@ export const OnboardingModal: React.FC<{
             type="button"
             onClick={() => submit(true)}
             aria-label="Skip personalization"
-            className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer"
+            className="p-1.5 rounded-full hover:bg-[#eff3f4] dark:hover:bg-[#16181c] cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -203,7 +87,7 @@ export const OnboardingModal: React.FC<{
           <select
             value={preferredLanguage}
             onChange={(e) => setPreferredLanguage(e.target.value)}
-            className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+            className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
           >
             {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((lang) => (
               <option key={lang} value={lang}>
@@ -223,10 +107,10 @@ export const OnboardingModal: React.FC<{
                   key={topic}
                   type="button"
                   onClick={() => toggleTopic(topic)}
-                  className={`h-8 px-3.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                  className={`h-8 px-3.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
                     active
-                      ? 'bg-[#ff0033] text-white'
-                      : 'bg-neutral-100 dark:bg-[#2b2b2b] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a]'
+                      ? 'bg-[#0f1419] text-white dark:bg-white dark:text-black'
+                      : 'bg-[#eff3f4] dark:bg-[#202327] hover:bg-neutral-200 dark:hover:bg-[#2f3336]'
                   }`}
                 >
                   {topic}
@@ -241,7 +125,7 @@ export const OnboardingModal: React.FC<{
             type="button"
             disabled={saving}
             onClick={() => submit(true)}
-            className="text-xs font-medium text-[#606060] dark:text-[#aaaaaa] hover:underline cursor-pointer"
+            className="text-xs font-medium text-[#536471] dark:text-[#71767b] hover:underline cursor-pointer"
           >
             Skip for now
           </button>
@@ -249,7 +133,7 @@ export const OnboardingModal: React.FC<{
             type="button"
             disabled={saving}
             onClick={() => submit(false)}
-            className="h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+            className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-semibold cursor-pointer"
           >
             {saving ? 'Saving...' : 'Build my feed'}
           </button>
@@ -336,7 +220,7 @@ export const UploadModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="px-6 py-4 border-b border-neutral-200 dark:border-[#383838] flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold">Upload video to DopTube</h2>
@@ -347,7 +231,7 @@ export const UploadModal: React.FC<{
                   onClose();
                   onOpenMusicUpload();
                 }}
-                className="text-xs text-[#065fd4] dark:text-[#3ea6ff] hover:underline cursor-pointer"
+                className="text-xs text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white hover:underline cursor-pointer"
               >
                 Want to upload an MP3/M4A audio track to DopTube Music instead?
               </button>
@@ -371,7 +255,7 @@ export const UploadModal: React.FC<{
           )}
 
           {/* Video File Picker */}
-          <label className="block border-2 border-dashed border-neutral-300 dark:border-[#3e3e3e] rounded-xl p-6 text-center cursor-pointer hover:border-[#3ea6ff] transition-colors">
+          <label className="block border-2 border-dashed border-[#e5e7eb] dark:border-[#2f3336] rounded-xl p-6 text-center cursor-pointer hover:border-[#0f1419] dark:hover:border-white transition-colors">
             <input
               type="file"
               accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
@@ -385,7 +269,7 @@ export const UploadModal: React.FC<{
               }}
             />
             <div className="w-12 h-12 rounded-full bg-neutral-100 dark:bg-[#2c2c2c] mx-auto flex items-center justify-center mb-2">
-              {videoFile ? <FileVideo className="w-6 h-6 text-[#ff0033]" /> : <Upload className="w-6 h-6" />}
+              {videoFile ? <FileVideo className="w-6 h-6 text-[#0f1419] dark:text-white" /> : <Upload className="w-6 h-6" />}
             </div>
             <p className="text-sm font-medium">
               {videoFile ? `${videoFile.name} (${(videoFile.size / (1024 * 1024)).toFixed(2)} MB)` : 'Select MP4, WebM, or MOV video file'}
@@ -406,7 +290,7 @@ export const UploadModal: React.FC<{
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Add a clear title describing your video"
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               />
             </div>
 
@@ -417,7 +301,7 @@ export const UploadModal: React.FC<{
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Tell viewers about your video..."
-                className="w-full p-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full p-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               />
             </div>
 
@@ -426,7 +310,7 @@ export const UploadModal: React.FC<{
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               >
                 {ALL_CATEGORIES.map((c) => (
                   <option key={c} value={c}>{c}</option>
@@ -439,7 +323,7 @@ export const UploadModal: React.FC<{
               <select
                 value={language}
                 onChange={(e) => setLanguage(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               >
                 {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((l) => (
                   <option key={l} value={l}>{l}</option>
@@ -452,7 +336,7 @@ export const UploadModal: React.FC<{
               <select
                 value={visibility}
                 onChange={(e) => setVisibility(e.target.value as 'public' | 'unlisted' | 'private')}
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               >
                 <option value="public">Public</option>
                 <option value="unlisted">Unlisted</option>
@@ -467,13 +351,13 @@ export const UploadModal: React.FC<{
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
                 placeholder="e.g. physics, jee, hindi"
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium mb-1">Custom Thumbnail (optional)</label>
-              <label className="h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-xs flex items-center gap-2 cursor-pointer">
+              <label className="h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-xs flex items-center gap-2 cursor-pointer">
                 <ImagePlus className="w-4 h-4 shrink-0" />
                 <span className="truncate">{thumbFile ? thumbFile.name : 'Auto-generate from video'}</span>
                 <input
@@ -491,7 +375,7 @@ export const UploadModal: React.FC<{
                   type="checkbox"
                   checked={isShort}
                   onChange={(e) => setIsShort(e.target.checked)}
-                  className="w-4 h-4 accent-[#ff0033]"
+                  className="w-4 h-4 accent-[#0f1419] dark:accent-white"
                 />
                 <span>Publish as DopTube Short (vertical)</span>
               </label>
@@ -506,7 +390,7 @@ export const UploadModal: React.FC<{
               </div>
               <div className="h-2 rounded-full bg-neutral-300 dark:bg-[#333] overflow-hidden">
                 <div
-                  className="h-full bg-[#ff0033] transition-all duration-200"
+                  className="h-full bg-[#0f1419] dark:bg-white transition-all duration-200"
                   style={{ width: `${processingStage ? processingPct : uploadPct}%` }}
                 />
               </div>
@@ -525,7 +409,7 @@ export const UploadModal: React.FC<{
             <button
               type="submit"
               disabled={uploading}
-              className="h-9 px-5 rounded-full bg-[#ff0033] hover:bg-[#d9002b] text-white text-sm font-semibold disabled:opacity-60 cursor-pointer"
+              className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-semibold disabled:opacity-60 cursor-pointer"
             >
               {uploading ? 'Processing...' : 'Publish Video'}
             </button>
@@ -603,7 +487,7 @@ export const PlaylistModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-5 shadow-2xl">
+      <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-5 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-base">Save video to...</h3>
           <button type="button" onClick={onClose} aria-label="Close playlist modal" className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
@@ -623,7 +507,7 @@ export const PlaylistModal: React.FC<{
                     type="checkbox"
                     checked={checked}
                     onChange={() => toggleVideoInPlaylist(pl)}
-                    className="w-4 h-4 accent-[#3ea6ff]"
+                    className="w-4 h-4 accent-[#0f1419] dark:accent-white"
                   />
                   <span className="flex-1 truncate">{pl.title}</span>
                   <span className="text-xs text-[#606060] dark:text-[#aaaaaa] font-mono-nums">{pl.videos.length}</span>
@@ -639,7 +523,7 @@ export const PlaylistModal: React.FC<{
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder="New playlist name..."
-            className="flex-1 h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+            className="flex-1 h-9 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
           />
           <button
             type="submit"
@@ -694,10 +578,10 @@ export const ReportModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base flex items-center gap-2">
-            <ShieldAlert className="w-5 h-5 text-[#ff0033]" />
+            <ShieldAlert className="w-5 h-5 text-[#0f1419] dark:text-white" />
             Report or Copyright Claim
           </h3>
           <button type="button" onClick={onClose} aria-label="Close report modal" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
@@ -735,7 +619,7 @@ export const ReportModal: React.FC<{
               <select
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
               >
                 <option>Misleading or spam content</option>
                 <option>Harassment or hate speech</option>
@@ -754,7 +638,7 @@ export const ReportModal: React.FC<{
                   value={claimantName}
                   onChange={(e) => setClaimantName(e.target.value)}
                   placeholder="Full legal name or studio"
-                  className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                  className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
                 />
               </div>
               <div>
@@ -765,7 +649,7 @@ export const ReportModal: React.FC<{
                   value={claimantEmail}
                   onChange={(e) => setClaimantEmail(e.target.value)}
                   placeholder="legal@organization.in"
-                  className="w-full h-10 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                  className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
                 />
               </div>
             </>
@@ -781,7 +665,7 @@ export const ReportModal: React.FC<{
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               placeholder="Provide context or timestamps..."
-              className="w-full p-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+              className="w-full p-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
             />
           </div>
 
@@ -789,7 +673,7 @@ export const ReportModal: React.FC<{
             <button type="button" onClick={onClose} className="h-9 px-4 rounded-full text-sm hover:bg-neutral-100 dark:hover:bg-[#333] cursor-pointer">
               Cancel
             </button>
-            <button type="submit" className="h-9 px-4 rounded-full bg-[#ff0033] text-white text-sm font-semibold cursor-pointer">
+            <button type="submit" className="h-9 px-4 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-semibold cursor-pointer">
               Submit
             </button>
           </div>
@@ -820,7 +704,7 @@ export const ShareModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-5 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-5 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base">Share video</h3>
           <button type="button" onClick={onClose} aria-label="Close share dialog" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
@@ -828,7 +712,7 @@ export const ShareModal: React.FC<{
           </button>
         </div>
         <p className="text-sm font-medium mb-3 line-clamp-2">{video.title}</p>
-        <div className="flex items-center gap-2 p-2 rounded-xl bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838]">
+        <div className="flex items-center gap-2 p-2 rounded-xl bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
           <input
             type="text"
             readOnly
@@ -838,7 +722,7 @@ export const ShareModal: React.FC<{
           <button
             type="button"
             onClick={copyLink}
-            className="h-8 px-3.5 rounded-full bg-[#3ea6ff] text-[#0f0f0f] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            className="h-8 px-3.5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
           >
             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             {copied ? 'Copied' : 'Copy'}
@@ -911,12 +795,12 @@ export const VoiceSearchModal: React.FC<{
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 text-center relative shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-6 text-center relative shadow-2xl">
         <button type="button" onClick={onClose} aria-label="Close voice search" className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
           <X className="w-4 h-4" />
         </button>
 
-        <div className="w-20 h-20 rounded-full bg-[#ff0033] text-white mx-auto flex items-center justify-center mb-4">
+        <div className="w-20 h-20 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black mx-auto flex items-center justify-center mb-4">
           <Mic className="w-9 h-9" />
         </div>
         <h3 className="text-lg font-bold mb-1">DopTube Voice Search</h3>
@@ -956,7 +840,7 @@ export const ShortcutsModal: React.FC<{ open: boolean; onClose: () => void }> = 
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] p-6 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-base">Keyboard shortcuts</h3>
           <button type="button" onClick={onClose} aria-label="Close shortcuts dialog" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
@@ -967,7 +851,7 @@ export const ShortcutsModal: React.FC<{ open: boolean; onClose: () => void }> = 
           {rows.map(([key, desc]) => (
             <div key={key} className="py-2.5 flex items-center justify-between text-sm">
               <span className="text-[#606060] dark:text-[#aaaaaa]">{desc}</span>
-              <kbd className="px-2 py-0.5 rounded bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] font-mono-nums text-xs">
+              <kbd className="px-2 py-0.5 rounded bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] font-mono-nums text-xs">
                 {key}
               </kbd>
             </div>

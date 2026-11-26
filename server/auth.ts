@@ -1,14 +1,16 @@
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { db } from './db.ts';
 import { verifySessionToken, type SessionPayload } from './domain.ts';
 
 export const SESSION_COOKIE = 'doptube_session';
 
-const RUNTIME_SESSION_SECRET = randomBytes(32).toString('hex');
+const FALLBACK_SESSION_SECRET = createHash('sha256')
+  .update('sodium-booster-bv9wh:ai-studio-doptube-aa4523de-08c1-49e2-88b8-a324bef5d6ed:doptube-session-v1')
+  .digest('hex');
 
 export function getSessionSecret(): string {
-  return process.env.SESSION_SECRET || RUNTIME_SESSION_SECRET;
+  return (process.env.SESSION_SECRET || FALLBACK_SESSION_SECRET).trim();
 }
 
 export interface AuthedRequest extends Request {
@@ -32,19 +34,66 @@ export function parseCookies(cookieHeader?: string): Record<string, string> {
   return out;
 }
 
+function hydrateSessionUserIfMissing(payload: SessionPayload): { id: string; role: 'user' | 'creator' | 'admin' } | null {
+  const existing = db.prepare('SELECT id, role FROM users WHERE id = ?').get(payload.userId) as
+    | { id: string; role: 'user' | 'creator' | 'admin' }
+    | undefined;
+  if (existing) return existing;
+
+  // On ephemeral Vercel serverless /tmp SQLite instances, re-hydrate verified signed token claims
+  if (!payload.email) return null;
+
+  const nowIso = new Date().toISOString();
+  const safeName = (payload.name || payload.email.split('@')[0] || 'DopTube User').trim();
+  const safeEmail = payload.email.trim().toLowerCase();
+  const safeLang = payload.preferredLanguage || 'English';
+  const chId = `ch_${payload.userId.replace(/^u_/, '')}`;
+  const avatarUrl = payload.avatarUrl || `/api/avatars/${chId}.svg`;
+  const cleanBase = (payload.handle || `@${safeName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'creator'}`).replace(/^@*/, '@');
+
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO users (id, name, email, password_hash, avatar_url, birthday, role, preferred_language, email_verified, created_at)
+      VALUES (?, ?, ?, 'session_hydrated', ?, ?, ?, ?, 1, ?)
+    `).run(payload.userId, safeName, safeEmail, avatarUrl, payload.birthday || '', payload.role, safeLang, nowIso);
+
+    const existingChannel = db.prepare('SELECT id FROM channels WHERE user_id = ?').get(payload.userId);
+    if (!existingChannel) {
+      let handle = cleanBase;
+      if (db.prepare('SELECT id FROM channels WHERE handle = ?').get(handle)) {
+        handle = `${cleanBase}_${payload.userId.slice(-4)}`;
+      }
+      db.prepare(`
+        INSERT OR IGNORE INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, '#000000', 0, 0, ?)
+      `).run(chId, payload.userId, safeName, handle, `Official DopTube channel of ${safeName}.`, avatarUrl, nowIso);
+    }
+
+    db.prepare(`
+      INSERT OR IGNORE INTO user_preferences (
+        user_id, preferred_languages_json, preferred_categories_json, selected_interests_json,
+        preferred_format, personalization_enabled, infinite_scroll_enabled, autoplay_enabled,
+        onboarding_completed, updated_at
+      ) VALUES (?, ?, '[]', '[]', 'all', 1, 1, 1, 1, ?)
+    `).run(payload.userId, JSON.stringify([safeLang]), nowIso);
+
+    return { id: payload.userId, role: payload.role };
+  } catch {
+    return null;
+  }
+}
+
 export function attachAuth(req: AuthedRequest, _res: Response, next: NextFunction) {
   const cookies = parseCookies(req.headers.cookie);
   const authHeader = req.headers.authorization;
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  const token = cookies[SESSION_COOKIE] || bearerToken;
+  const token = bearerToken || cookies[SESSION_COOKIE];
   if (token) {
     const payload = verifySessionToken(token, getSessionSecret());
     if (payload) {
-      const exists = db.prepare('SELECT id, role FROM users WHERE id = ?').get(payload.userId) as
-        | { id: string; role: 'user' | 'creator' | 'admin' }
-        | undefined;
-      if (exists) {
-        req.auth = { ...payload, role: exists.role };
+      const userRow = hydrateSessionUserIfMissing(payload);
+      if (userRow) {
+        req.auth = { ...payload, role: userRow.role };
       }
     }
   }

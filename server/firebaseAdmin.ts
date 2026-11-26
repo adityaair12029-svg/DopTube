@@ -7,16 +7,19 @@ interface FirebaseAppletConfig {
   projectId?: string;
 }
 
-function loadProjectId(): string | null {
+const FALLBACK_FIREBASE_PROJECT_ID = 'sodium-booster-bv9wh';
+
+function loadProjectId(): string {
   try {
     const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) return null;
-    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as FirebaseAppletConfig;
-    if (!raw.projectId || raw.projectId === 'remixed-project-id') return null;
-    return raw.projectId;
+    if (fs.existsSync(configPath)) {
+      const raw = JSON.parse(fs.readFileSync(configPath, 'utf8')) as FirebaseAppletConfig;
+      if (raw.projectId && raw.projectId !== 'remixed-project-id') return raw.projectId;
+    }
   } catch {
-    return null;
+    // fall through to embedded project id
   }
+  return process.env.FIREBASE_PROJECT_ID || FALLBACK_FIREBASE_PROJECT_ID;
 }
 
 export interface VerifiedGoogleIdentity {

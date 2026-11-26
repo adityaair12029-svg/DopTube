@@ -70,7 +70,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
   const thumbnailBox = (
     <div
-      className={`relative overflow-hidden bg-neutral-200 dark:bg-[#1f1f1f] shrink-0 group ${
+      className={`relative overflow-hidden bg-[#eff3f4] dark:bg-[#16181c] shrink-0 group ${
         layout === 'horizontal'
           ? 'w-full sm:w-[360px] md:w-[400px] aspect-video rounded-xl'
           : layout === 'compact'
@@ -94,19 +94,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-neutral-800 to-neutral-900 p-4 text-center text-white text-sm font-semibold">
+          <div className="w-full h-full flex items-center justify-center bg-black p-4 text-center text-white text-sm font-semibold">
             {video.title}
           </div>
         )}
       </button>
 
       {video.isLive ? (
-        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-[#cc0000] text-white text-[11px] font-semibold tracking-wide flex items-center gap-1 pointer-events-none">
+        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/85 text-white text-[11px] font-semibold tracking-wide flex items-center gap-1 pointer-events-none">
           <Radio className="w-3 h-3" />
           LIVE
         </span>
       ) : video.isShort ? (
-        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-[#ff0033] text-white text-[10px] font-bold tracking-wider flex items-center gap-1 pointer-events-none shadow">
+        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/85 text-white text-[10px] font-bold tracking-wider flex items-center gap-1 pointer-events-none shadow">
           <Zap className="w-2.5 h-2.5 fill-white" />
           SHORTS
         </span>
@@ -118,7 +118,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
 
       {progressPct > 0 && (
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/30 pointer-events-none">
-          <div className="h-full bg-[#ff0033]" style={{ width: `${progressPct}%` }} />
+          <div className="h-full bg-white" style={{ width: `${progressPct}%` }} />
         </div>
       )}
     </div>
@@ -133,12 +133,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           setMenuOpen((v) => !v);
         }}
         aria-label={`More actions for ${video.title}`}
-        className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-200 dark:hover:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] cursor-pointer"
+        className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#eff3f4] dark:hover:bg-[#16181c] text-[#0f1419] dark:text-[#e7e9ea] cursor-pointer"
       >
         <MoreVertical className="w-4 h-4" />
       </button>
       {menuOpen && (
-        <div className="absolute right-0 top-9 w-56 rounded-xl bg-white dark:bg-[#282828] border border-neutral-200 dark:border-[#3e3e3e] shadow-2xl py-1.5 z-40 text-sm">
+        <div className="absolute right-0 top-9 w-56 rounded-xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] shadow-2xl py-1.5 z-40 text-sm">
           {onPlayNext && (
             <button
               type="button"
@@ -264,19 +264,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <button
             type="button"
             onClick={() => onWatch(video.id, video)}
-            className="text-left text-[14px] font-semibold leading-snug text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 hover:text-[#ff0033] dark:hover:text-white cursor-pointer"
+            className="text-left text-[14px] font-semibold leading-snug text-[#0f1419] dark:text-[#e7e9ea] line-clamp-2 hover:underline cursor-pointer"
           >
             {video.title}
           </button>
           <button
             type="button"
             onClick={() => onOpenChannel(video.channelId)}
-            className="mt-1 flex items-center gap-1 text-[12px] text-[#606060] dark:text-[#aaaaaa] hover:text-[#0f0f0f] dark:hover:text-white cursor-pointer"
+            className="mt-1 flex items-center gap-1 text-[12px] text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white cursor-pointer"
           >
             <span className="truncate">{video.channelName}</span>
             {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
           </button>
-          <p className="text-[12px] text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+          <p className="text-[12px] text-[#536471] dark:text-[#71767b] font-mono-nums">
             {formatViews(video.views)} views · {formatRelativeTime(video.createdAt)}
           </p>
         </div>
@@ -294,17 +294,17 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             <button
               type="button"
               onClick={() => onWatch(video.id, video)}
-              className="text-left text-[18px] font-semibold leading-snug text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 cursor-pointer"
+              className="text-left text-[18px] font-semibold leading-snug text-[#0f1419] dark:text-[#e7e9ea] line-clamp-2 cursor-pointer"
             >
               {video.title}
             </button>
-            <p className="mt-1 text-[12px] text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+            <p className="mt-1 text-[12px] text-[#536471] dark:text-[#71767b] font-mono-nums">
               {formatViews(video.views)} views · {formatRelativeTime(video.createdAt)} · {video.language}
             </p>
             <button
               type="button"
               onClick={() => onOpenChannel(video.channelId)}
-              className="my-2.5 flex items-center gap-2 text-[13px] text-[#606060] dark:text-[#aaaaaa] hover:text-[#0f0f0f] dark:hover:text-white cursor-pointer"
+              className="my-2.5 flex items-center gap-2 text-[13px] text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white cursor-pointer"
             >
               <img
                 src={video.channelAvatar}
@@ -315,7 +315,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
               <span className="truncate font-medium">{video.channelName}</span>
               {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
             </button>
-            <p className="text-[13px] text-[#606060] dark:text-[#aaaaaa] line-clamp-2 leading-relaxed">
+            <p className="text-[13px] text-[#536471] dark:text-[#71767b] line-clamp-2 leading-relaxed">
               {video.description}
             </p>
           </div>
@@ -348,7 +348,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <button
             type="button"
             onClick={() => onWatch(video.id, video)}
-            className="text-left text-[15px] sm:text-[16px] font-semibold leading-[1.35] text-[#0f0f0f] dark:text-[#f1f1f1] line-clamp-2 cursor-pointer"
+            className="text-left text-[15px] sm:text-[16px] font-semibold leading-[1.35] text-[#0f1419] dark:text-[#e7e9ea] line-clamp-2 cursor-pointer"
           >
             {video.title}
           </button>
@@ -356,13 +356,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <button
             type="button"
             onClick={() => onOpenChannel(video.channelId)}
-            className="mt-1 flex items-center gap-1 text-[13px] text-[#606060] dark:text-[#aaaaaa] hover:text-[#0f0f0f] dark:hover:text-white cursor-pointer"
+            className="mt-1 flex items-center gap-1 text-[13px] text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white cursor-pointer"
           >
             <span className="truncate">{video.channelName}</span>
             {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
           </button>
 
-          <p className="text-[13px] text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+          <p className="text-[13px] text-[#536471] dark:text-[#71767b] font-mono-nums">
             {formatViews(video.views)} views · {video.isLive ? 'Streaming live' : formatRelativeTime(video.createdAt)}
           </p>
         </div>

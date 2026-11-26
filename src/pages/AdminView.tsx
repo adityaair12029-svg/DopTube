@@ -41,9 +41,9 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
   if (!user || user.role !== 'admin') {
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
-        <ShieldCheck className="w-10 h-10 mx-auto text-[#ff0033] mb-3" />
+        <ShieldCheck className="w-10 h-10 mx-auto text-[#0f1419] dark:text-white mb-3" />
         <h2 className="text-xl font-bold">Administrator Access Required</h2>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
+        <p className="text-sm text-[#536471] dark:text-[#71767b] mt-2">
           {error || 'Sign in with your Google Admin account (doptails@gmail.com) to access moderation, AI recommendation analytics, and audit tools.'}
         </p>
       </div>
@@ -56,7 +56,7 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 pb-24 space-y-8">
       <div>
         <h1 className="text-2xl font-bold">DopTube Admin & Moderation Console</h1>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
+        <p className="text-sm text-[#536471] dark:text-[#71767b]">
           Role-protected trust, safety, copyright compliance, AI recommendation monitoring, and platform auditing.
         </p>
       </div>
@@ -68,8 +68,8 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
           ['Open Reports', data.metrics.openReports],
           ['Pending Copyright Claims', data.metrics.pendingClaims],
         ].map(([label, val]) => (
-          <div key={String(label)} className="p-4 rounded-xl bg-neutral-100 dark:bg-[#1a1a1a] border border-neutral-200 dark:border-[#2e2e2e]">
-            <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">{label}</p>
+          <div key={String(label)} className="p-4 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
+            <p className="text-xs text-[#536471] dark:text-[#71767b]">{label}</p>
             <p className="text-2xl font-bold font-mono-nums mt-1">{val}</p>
           </div>
         ))}
@@ -77,10 +77,10 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
 
       {/* AI Recommendation Engine Analytics */}
       {aiAnalytics && (
-        <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] p-5 space-y-4">
+        <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-[#ff0033]" />
-            <h2 className="font-semibold text-base">AI Recommendation Engine Analytics</h2>
+            <Sparkles className="w-5 h-5" />
+            <h2 className="font-bold text-base">AI Recommendation Engine Analytics</h2>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
@@ -93,8 +93,8 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
               ['Creator Blocks', aiAnalytics.dontRecommendCreatorCount],
               ['Anomaly Flags', aiAnalytics.anomalyFlags],
             ].map(([label, val]) => (
-              <div key={String(label)} className="p-3 rounded-lg bg-neutral-100 dark:bg-[#181818]">
-                <p className="text-[11px] text-[#606060] dark:text-[#aaaaaa]">{label}</p>
+              <div key={String(label)} className="p-3 rounded-xl bg-[#eff3f4] dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336]">
+                <p className="text-[11px] text-[#536471] dark:text-[#71767b]">{label}</p>
                 <p className="text-lg font-bold font-mono-nums mt-0.5">{val}</p>
               </div>
             ))}
@@ -102,12 +102,12 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
 
           {aiAnalytics.topTopics.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-[#606060] dark:text-[#aaaaaa] mb-2">Top User Interests</p>
+              <p className="text-xs font-semibold text-[#536471] dark:text-[#71767b] mb-2">Top User Interests</p>
               <div className="flex flex-wrap gap-2">
                 {aiAnalytics.topTopics.map((topic) => (
                   <span
                     key={topic.topic}
-                    className="px-3 py-1 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium"
+                    className="px-3 py-1 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-medium"
                   >
                     {topic.topic} · avg {topic.avgScore}% ({topic.usersCount} users)
                   </span>
@@ -120,16 +120,16 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Content Reports Queue */}
-        <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] p-5 space-y-3">
-          <h2 className="font-semibold text-base">Moderation Reports</h2>
+        <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] p-5 space-y-3">
+          <h2 className="font-bold text-base">Moderation Reports</h2>
           {data.reports.length === 0 ? (
-            <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">No user reports filed.</p>
+            <p className="text-sm text-[#536471] dark:text-[#71767b]">No user reports filed.</p>
           ) : (
             data.reports.map((r) => (
-              <div key={r.id} className="p-3 rounded-lg bg-neutral-100 dark:bg-[#181818] flex items-center justify-between gap-3 text-xs">
+              <div key={r.id} className="p-3 rounded-lg bg-[#eff3f4] dark:bg-black flex items-center justify-between gap-3 text-xs">
                 <div>
                   <p className="font-semibold">{r.reason}</p>
-                  <p className="text-[#606060] dark:text-[#aaaaaa]">
+                  <p className="text-[#536471] dark:text-[#71767b]">
                     {r.target_type} ({r.target_id}) · Status: {r.status}
                   </p>
                 </div>
@@ -158,7 +158,7 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
                       load();
                       onToast('Report dismissed');
                     }}
-                    className="px-2.5 py-1 rounded bg-neutral-300 dark:bg-[#333] cursor-pointer"
+                    className="px-2.5 py-1 rounded bg-[#e5e7eb] dark:bg-[#202327] cursor-pointer"
                   >
                     Dismiss
                   </button>
@@ -169,18 +169,18 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
         </section>
 
         {/* Copyright Claims */}
-        <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] p-5 space-y-3">
-          <h2 className="font-semibold text-base">Copyright Takedown Claims</h2>
+        <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] p-5 space-y-3">
+          <h2 className="font-bold text-base">Copyright Takedown Claims</h2>
           {data.copyrightClaims.length === 0 ? (
-            <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">No active copyright claims.</p>
+            <p className="text-sm text-[#536471] dark:text-[#71767b]">No active copyright claims.</p>
           ) : (
             data.copyrightClaims.map((c) => (
-              <div key={c.id} className="p-3 rounded-lg bg-neutral-100 dark:bg-[#181818] space-y-2 text-xs">
+              <div key={c.id} className="p-3 rounded-lg bg-[#eff3f4] dark:bg-black space-y-2 text-xs">
                 <div className="flex justify-between">
                   <span className="font-semibold">{c.claimant_name}</span>
                   <span>{c.status}</span>
                 </div>
-                <p className="text-[#606060] dark:text-[#aaaaaa]">Video: {c.videoTitle || c.video_id}</p>
+                <p className="text-[#536471] dark:text-[#71767b]">Video: {c.videoTitle || c.video_id}</p>
                 <p>{c.reason}</p>
                 <div className="flex gap-2">
                   <button
@@ -193,7 +193,7 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
                       load();
                       onToast('Video taken down under copyright policy');
                     }}
-                    className="px-2.5 py-1 rounded bg-[#ff0033] text-white cursor-pointer"
+                    className="px-3 py-1 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black font-bold cursor-pointer"
                   >
                     Takedown Video
                   </button>
@@ -207,7 +207,7 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
                       load();
                       onToast('Claim rejected');
                     }}
-                    className="px-2.5 py-1 rounded bg-neutral-300 dark:bg-[#333] cursor-pointer"
+                    className="px-3 py-1 rounded-full bg-[#e5e7eb] dark:bg-[#202327] cursor-pointer"
                   >
                     Reject
                   </button>
@@ -220,14 +220,14 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
 
       {/* User Management & Audit Logs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] p-5">
-          <h2 className="font-semibold text-base mb-3">Users & Role Permissions</h2>
-          <div className="divide-y divide-neutral-200 dark:divide-[#272727] max-h-72 overflow-y-auto">
+        <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] p-5">
+          <h2 className="font-bold text-base mb-3">Users & Role Permissions</h2>
+          <div className="divide-y divide-[#e5e7eb] dark:divide-[#2f3336] max-h-72 overflow-y-auto">
             {data.users.map((u) => (
               <div key={u.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
                 <div>
                   <p className="font-semibold">{u.name}</p>
-                  <p className="text-[#606060] dark:text-[#aaaaaa]">{u.email} · {u.preferredLanguage}</p>
+                  <p className="text-[#536471] dark:text-[#71767b]">{u.email} · {u.preferredLanguage}</p>
                 </div>
                 <select
                   value={u.role}
@@ -239,7 +239,7 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
                     load();
                     onToast('User role updated');
                   }}
-                  className="h-7 px-2 rounded bg-neutral-100 dark:bg-[#272727]"
+                  className="h-7 px-2 rounded bg-[#eff3f4] dark:bg-[#202327]"
                 >
                   <option value="user">user</option>
                   <option value="creator">creator</option>
@@ -250,13 +250,13 @@ export const AdminView: React.FC<{ user: UserProfile | null; onToast: (msg: stri
           </div>
         </section>
 
-        <section className="rounded-xl border border-neutral-200 dark:border-[#2e2e2e] p-5">
-          <h2 className="font-semibold text-base mb-3">Security Audit Logs</h2>
+        <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] p-5">
+          <h2 className="font-bold text-base mb-3">Security Audit Logs</h2>
           <div className="space-y-2 max-h-72 overflow-y-auto text-xs font-mono-nums">
             {data.auditLogs.map((log) => (
-              <div key={log.id} className="p-2 rounded bg-neutral-100 dark:bg-[#181818] flex justify-between gap-2">
+              <div key={log.id} className="p-2 rounded bg-[#eff3f4] dark:bg-black flex justify-between gap-2">
                 <span>{log.action} ({log.target_type})</span>
-                <span className="text-[#606060] dark:text-[#aaaaaa]">{new Date(log.created_at).toLocaleString()}</span>
+                <span className="text-[#536471] dark:text-[#71767b]">{new Date(log.created_at).toLocaleString()}</span>
               </div>
             ))}
           </div>

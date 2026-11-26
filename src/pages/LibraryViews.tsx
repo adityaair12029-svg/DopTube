@@ -86,25 +86,25 @@ export const YouView: React.FC<
   if (!user) {
     return (
       <div className="max-w-lg mx-auto px-4 py-16 text-center space-y-4">
-        <div className="w-16 h-16 rounded-full bg-neutral-100 dark:bg-[#1f1f1f] mx-auto flex items-center justify-center">
-          <UserCheck className="w-8 h-8 text-[#ff0033]" />
+        <div className="w-16 h-16 rounded-full bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] mx-auto flex items-center justify-center">
+          <UserCheck className="w-8 h-8 text-[#0f1419] dark:text-white" />
         </div>
         <h1 className="text-2xl font-bold">Your DopTube Hub</h1>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
-          Sign in with Google to view your history, saved playlists, liked videos, Watch later, and AI personalization controls.
+        <p className="text-sm text-[#536471] dark:text-[#71767b]">
+          Sign in to view your history, saved playlists, liked videos, Watch later, and AI personalization controls.
         </p>
         <div className="flex flex-wrap justify-center gap-2 pt-2">
           <button
             type="button"
             onClick={onOpenAuth}
-            className="h-10 px-6 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+            className="h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
           >
-            Sign in with Google
+            Sign in
           </button>
           <button
             type="button"
             onClick={() => onNavigate('settings')}
-            className="h-10 px-5 rounded-full bg-neutral-100 dark:bg-[#272727] text-sm font-medium cursor-pointer"
+            className="h-10 px-5 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-sm font-semibold cursor-pointer"
           >
             Settings
           </button>
@@ -120,7 +120,7 @@ export const YouView: React.FC<
         <button
           type="button"
           onClick={onOpenAuth}
-          className="h-8 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+          className="h-8 px-3.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
         >
           <span>Accounts</span>
           <ChevronRight className="w-3.5 h-3.5 rotate-90" />
@@ -129,7 +129,7 @@ export const YouView: React.FC<
           type="button"
           onClick={() => onNavigate('settings')}
           aria-label="Open Settings"
-          className="h-8 px-3 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+          className="h-8 px-3 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
         >
           <Settings className="w-3.5 h-3.5" />
           <span>Settings</span>
@@ -142,11 +142,11 @@ export const YouView: React.FC<
           src={user.avatarUrl}
           alt={user.name}
           referrerPolicy="no-referrer"
-          className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border border-neutral-200 dark:border-[#333]"
+          className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border border-[#e5e7eb] dark:border-[#2f3336]"
         />
         <div className="min-w-0 flex-1">
           <h1 className="text-xl sm:text-2xl font-bold truncate">{user.name}</h1>
-          <p className="text-xs sm:text-sm text-[#606060] dark:text-[#aaaaaa] truncate">
+          <p className="text-xs sm:text-sm text-[#536471] dark:text-[#71767b] truncate">
             {user.channel?.handle || user.email} · {user.preferredLanguage}
           </p>
         </div>
@@ -157,21 +157,21 @@ export const YouView: React.FC<
         <button
           type="button"
           onClick={() => (user.channel ? onNavigate('channel', user.channel.id) : onNavigate('studio'))}
-          className="h-9 px-5 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-xs sm:text-sm font-semibold shrink-0 cursor-pointer"
+          className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs sm:text-sm font-bold shrink-0 cursor-pointer"
         >
           View channel
         </button>
         <button
           type="button"
           onClick={() => onNavigate('studio')}
-          className="h-9 px-5 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs sm:text-sm font-medium shrink-0 cursor-pointer"
+          className="h-9 px-5 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-xs sm:text-sm font-semibold shrink-0 cursor-pointer"
         >
           DopTube Studio
         </button>
         <button
           type="button"
           onClick={() => onNavigate('queue')}
-          className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#3a3a3a] text-xs sm:text-sm font-medium shrink-0 flex items-center gap-1.5 cursor-pointer"
+          className="h-9 px-4 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336] text-xs sm:text-sm font-semibold shrink-0 flex items-center gap-1.5 cursor-pointer"
         >
           <ListMusic className="w-4 h-4" />
           <span>Queue</span>
@@ -184,7 +184,7 @@ export const YouView: React.FC<
           <button
             type="button"
             onClick={() => onNavigate('history')}
-            className="flex items-center gap-1 text-lg font-bold hover:text-[#ff0033] cursor-pointer"
+            className="flex items-center gap-1 text-lg font-bold hover:opacity-80 cursor-pointer"
           >
             <span>History</span>
             <ChevronRight className="w-5 h-5" />
@@ -192,14 +192,14 @@ export const YouView: React.FC<
           <button
             type="button"
             onClick={() => onNavigate('history')}
-            className="h-7 px-3 rounded-full border border-neutral-300 dark:border-[#383838] text-xs font-medium cursor-pointer"
+            className="h-7 px-3 rounded-full border border-[#e5e7eb] dark:border-[#2f3336] text-xs font-semibold cursor-pointer"
           >
             View all
           </button>
         </div>
 
         {historyVideos.length === 0 ? (
-          <p className="text-xs text-[#606060] dark:text-[#aaaaaa] py-3">
+          <p className="text-xs text-[#536471] dark:text-[#71767b] py-3">
             Videos you watch on DopTube will appear here.
           </p>
         ) : (
@@ -211,7 +211,7 @@ export const YouView: React.FC<
                 onClick={() => onWatch(v.id, v)}
                 className="w-40 shrink-0 text-left group cursor-pointer"
               >
-                <div className="relative aspect-video rounded-xl overflow-hidden bg-neutral-200 dark:bg-[#1f1f1f]">
+                <div className="relative aspect-video rounded-xl overflow-hidden bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
                   <img
                     src={v.thumbnailUrl}
                     alt={v.title}
@@ -221,7 +221,7 @@ export const YouView: React.FC<
                   {v.progressSec && v.durationSec > 0 ? (
                     <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/30">
                       <div
-                        className="h-full bg-[#ff0033]"
+                        className="h-full bg-white"
                         style={{ width: `${Math.min(100, Math.round((v.progressSec / v.durationSec) * 100))}%` }}
                       />
                     </div>
@@ -385,28 +385,27 @@ export const YouView: React.FC<
               </div>
             ))}
 
-          {/* Quick Shortcuts to Music & Offline */}
           <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => onNavigate('music')}
-              className="p-3.5 rounded-xl bg-neutral-100 dark:bg-[#1a1a1a] hover:bg-neutral-200 dark:hover:bg-[#242424] flex items-center gap-3 text-left cursor-pointer"
+              className="p-3.5 rounded-2xl bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] hover:bg-[#e5e7eb] dark:hover:bg-[#202327] flex items-center gap-3 text-left cursor-pointer"
             >
-              <Music2 className="w-5 h-5 text-[#ff0033] shrink-0" />
+              <Music2 className="w-5 h-5 shrink-0" />
               <div>
                 <p className="text-sm font-semibold">DopTube Music</p>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Stream audio tracks, mixes & uploads</p>
+                <p className="text-xs text-[#536471] dark:text-[#71767b]">Stream audio tracks, mixes & uploads</p>
               </div>
             </button>
             <button
               type="button"
               onClick={() => onNavigate('downloads')}
-              className="p-3.5 rounded-xl bg-neutral-100 dark:bg-[#1a1a1a] hover:bg-neutral-200 dark:hover:bg-[#242424] flex items-center gap-3 text-left cursor-pointer"
+              className="p-3.5 rounded-2xl bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] hover:bg-[#e5e7eb] dark:hover:bg-[#202327] flex items-center gap-3 text-left cursor-pointer"
             >
-              <Download className="w-5 h-5 text-[#065fd4] dark:text-[#3ea6ff] shrink-0" />
+              <Download className="w-5 h-5 shrink-0" />
               <div>
                 <p className="text-sm font-semibold">Downloads & Native MP4s</p>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Authorized DopTube offline downloads</p>
+                <p className="text-xs text-[#536471] dark:text-[#71767b]">Authorized DopTube offline downloads</p>
               </div>
             </button>
           </div>
@@ -440,13 +439,13 @@ export const SubscriptionsView: React.FC<
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
         <h2 className="text-xl font-bold">Don’t miss new videos</h2>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
-          Sign in with Google to see updates from your favourite Indian creators on DopTube.
+        <p className="text-sm text-[#536471] dark:text-[#71767b] mt-2">
+          Sign in to see updates from your favourite Indian creators on DopTube.
         </p>
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-9 px-5 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          className="mt-5 h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
         >
           Sign in
         </button>
@@ -458,7 +457,7 @@ export const SubscriptionsView: React.FC<
     <div className="px-4 sm:px-6 py-4 pb-24">
       <h1 className="text-xl font-bold mb-4">Subscriptions</h1>
       {channels.length > 0 && (
-        <div className="flex items-center gap-4 overflow-x-auto no-scrollbar pb-4 mb-6 border-b border-neutral-200 dark:border-[#272727]">
+        <div className="flex items-center gap-4 overflow-x-auto no-scrollbar pb-4 mb-6 border-b border-[#e5e7eb] dark:border-[#2f3336]">
           {channels.map((ch) => (
             <button
               key={ch.id}
@@ -470,7 +469,7 @@ export const SubscriptionsView: React.FC<
                 src={ch.avatarUrl}
                 alt={ch.name}
                 referrerPolicy="no-referrer"
-                className="w-14 h-14 rounded-full object-cover group-hover:ring-2 ring-[#ff0033]"
+                className="w-14 h-14 rounded-full object-cover group-hover:ring-2 ring-[#0f1419] dark:ring-white"
               />
               <span className="text-xs font-medium truncate w-full text-center">{ch.name}</span>
             </button>
@@ -530,7 +529,7 @@ export const HistoryView: React.FC<
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-9 px-5 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          className="mt-5 h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
         >
           Sign in
         </button>
@@ -695,7 +694,7 @@ export const PlaylistsView: React.FC<
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-9 px-5 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          className="mt-5 h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
         >
           Sign in
         </button>
@@ -851,7 +850,7 @@ export const PlaylistsView: React.FC<
                     <button
                       type="button"
                       onClick={() => onPlayPlaylist(pl)}
-                      className="h-8 px-3.5 rounded-full bg-[#ff0033] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      className="h-8 px-3.5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Play className="w-3.5 h-3.5" />
                       Play all
@@ -860,7 +859,7 @@ export const PlaylistsView: React.FC<
                   <select
                     value={pl.visibility}
                     onChange={(e) => changeVisibility(pl.id, e.target.value as 'public' | 'unlisted' | 'private')}
-                    className="h-8 px-2.5 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium"
+                    className="h-8 px-2.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-medium"
                   >
                     <option value="private">Private</option>
                     <option value="unlisted">Unlisted</option>
@@ -869,7 +868,7 @@ export const PlaylistsView: React.FC<
                   <button
                     type="button"
                     onClick={() => deletePlaylist(pl.id)}
-                    className="h-8 px-3 rounded-full bg-neutral-100 dark:bg-[#272727] hover:text-red-500 text-xs font-medium flex items-center gap-1 cursor-pointer"
+                    className="h-8 px-3 rounded-full bg-[#eff3f4] dark:bg-[#202327] hover:text-red-500 text-xs font-medium flex items-center gap-1 cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     Delete
@@ -878,7 +877,7 @@ export const PlaylistsView: React.FC<
               </div>
 
               {pl.videos.length === 0 ? (
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">No videos added yet.</p>
+                <p className="text-xs text-[#536471] dark:text-[#71767b]">No videos added yet.</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {pl.videos.map((v, idx) => (
@@ -891,7 +890,7 @@ export const PlaylistsView: React.FC<
                             disabled={idx === 0}
                             onClick={() => moveVideo(pl, idx, -1)}
                             aria-label="Move up"
-                            className="p-1.5 rounded-full bg-neutral-100 dark:bg-[#272727] disabled:opacity-30 cursor-pointer"
+                            className="p-1.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] disabled:opacity-30 cursor-pointer"
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
                           </button>
@@ -900,7 +899,7 @@ export const PlaylistsView: React.FC<
                             disabled={idx === pl.videos.length - 1}
                             onClick={() => moveVideo(pl, idx, 1)}
                             aria-label="Move down"
-                            className="p-1.5 rounded-full bg-neutral-100 dark:bg-[#272727] disabled:opacity-30 cursor-pointer"
+                            className="p-1.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] disabled:opacity-30 cursor-pointer"
                           >
                             <ArrowDown className="w-3.5 h-3.5" />
                           </button>
@@ -908,7 +907,7 @@ export const PlaylistsView: React.FC<
                         <button
                           type="button"
                           onClick={() => removeVideo(pl.id, v.id)}
-                          className="text-xs text-[#606060] dark:text-[#aaaaaa] hover:text-red-500 flex items-center gap-1 cursor-pointer"
+                          className="text-xs text-[#536471] dark:text-[#71767b] hover:text-red-500 flex items-center gap-1 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           Remove
@@ -938,15 +937,15 @@ export const QueueView: React.FC<
   if (!user) {
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
-        <ListMusic className="w-10 h-10 mx-auto text-[#ff0033] mb-3" />
+        <ListMusic className="w-10 h-10 mx-auto text-[#0f1419] dark:text-white mb-3" />
         <h2 className="text-xl font-bold">Playback Queue</h2>
-        <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-2">
-          Sign in with Google to save videos to your Up Next playback queue across sessions.
+        <p className="text-sm text-[#536471] dark:text-[#71767b] mt-2">
+          Sign in to save videos to your Up Next playback queue across sessions.
         </p>
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-9 px-5 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          className="mt-5 h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
         >
           Sign in
         </button>
@@ -995,7 +994,7 @@ export const QueueView: React.FC<
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold">Playback Queue</h1>
-          <p className="text-sm text-[#606060] dark:text-[#aaaaaa]">
+          <p className="text-sm text-[#536471] dark:text-[#71767b]">
             {queue.length} queued videos ready for continuous autoplay
           </p>
         </div>
@@ -1005,7 +1004,7 @@ export const QueueView: React.FC<
             <button
               type="button"
               onClick={() => cardProps.onWatch(queue[0].id, queue[0])}
-              className="h-9 px-4 rounded-full bg-[#ff0033] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-4 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5" />
               Play queue
@@ -1013,7 +1012,7 @@ export const QueueView: React.FC<
             <button
               type="button"
               onClick={shuffleQueue}
-              className="h-9 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-3.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
             >
               <Shuffle className="w-3.5 h-3.5" />
               Shuffle
@@ -1021,7 +1020,7 @@ export const QueueView: React.FC<
             <button
               type="button"
               onClick={clearQueue}
-              className="h-9 px-3.5 rounded-full bg-neutral-100 dark:bg-[#272727] text-red-500 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-3.5 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-red-500 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Clear
@@ -1031,10 +1030,10 @@ export const QueueView: React.FC<
       </div>
 
       {queue.length === 0 ? (
-        <div className="py-16 text-center rounded-2xl bg-neutral-100 dark:bg-[#181818]">
-          <Sparkles className="w-8 h-8 mx-auto text-[#ff0033] mb-2" />
+        <div className="py-16 text-center rounded-2xl bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
+          <Sparkles className="w-8 h-8 mx-auto text-[#0f1419] dark:text-white mb-2" />
           <p className="text-sm font-medium">Your queue is empty</p>
-          <p className="text-xs text-[#606060] dark:text-[#aaaaaa] mt-1">
+          <p className="text-xs text-[#536471] dark:text-[#71767b] mt-1">
             Use “Play next” or “Add to queue” from any video’s menu to build your Up Next list.
           </p>
         </div>
@@ -1181,7 +1180,7 @@ export const SimpleVideoCollectionView: React.FC<
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-9 px-5 rounded-full bg-[#065fd4] dark:bg-[#3ea6ff] text-white dark:text-[#0f0f0f] text-sm font-semibold cursor-pointer"
+          className="mt-5 h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
         >
           Sign in
         </button>
@@ -1212,7 +1211,7 @@ export const SimpleVideoCollectionView: React.FC<
                   <a
                     href={v.videoUrl}
                     download={`${v.id}.mp4`}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[#065fd4] dark:text-[#3ea6ff] hover:underline"
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-[#0f1419] dark:text-white hover:underline"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Download MP4 (Authorized DopTube Host)
@@ -1355,26 +1354,26 @@ export const ChannelView: React.FC<
 
   return (
     <div className="pb-24">
-      <div className="h-32 sm:h-48 w-full" style={{ backgroundColor: channel.bannerColor || '#1f1f23' }} />
+      <div className="h-32 sm:h-48 w-full bg-[#eff3f4] dark:bg-[#16181c] border-b border-[#e5e7eb] dark:border-[#2f3336]" />
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        <div className="py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 dark:border-[#272727]">
+        <div className="py-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#e5e7eb] dark:border-[#2f3336]">
           <div className="flex items-center gap-4">
             <img
               src={channel.avatarUrl}
               alt={channel.name}
               referrerPolicy="no-referrer"
-              className="w-20 h-20 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-white dark:border-[#0f0f0f] -mt-10 sm:-mt-14"
+              className="w-20 h-20 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-white dark:border-black -mt-10 sm:-mt-14"
             />
             <div>
               <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-1.5">
                 {channel.name}
                 {channel.verified && <CheckCircle2 className="w-5 h-5" />}
               </h1>
-              <p className="text-xs sm:text-sm text-[#606060] dark:text-[#aaaaaa] font-mono-nums">
+              <p className="text-xs sm:text-sm text-[#536471] dark:text-[#71767b] font-mono-nums">
                 {channel.handle} · {formatViews(channel.subscriberCount)} subscribers · {formatViews(displayedTotal)} videos
               </p>
               {channel.description && (
-                <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mt-1.5 max-w-2xl">{channel.description}</p>
+                <p className="text-sm text-[#536471] dark:text-[#71767b] mt-1.5 max-w-2xl">{channel.description}</p>
               )}
             </div>
           </div>
@@ -1382,10 +1381,10 @@ export const ChannelView: React.FC<
           <button
             type="button"
             onClick={toggleSub}
-            className={`h-10 px-6 rounded-full text-sm font-semibold shrink-0 cursor-pointer ${
+            className={`h-10 px-6 rounded-full text-sm font-bold shrink-0 cursor-pointer ${
               channel.isSubscribed
-                ? 'bg-neutral-200 dark:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1]'
-                : 'bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f]'
+                ? 'bg-[#eff3f4] dark:bg-[#202327] text-[#0f1419] dark:text-[#e7e9ea]'
+                : 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
             }`}
           >
             {channel.isSubscribed ? 'Subscribed' : 'Subscribe'}
@@ -1393,7 +1392,7 @@ export const ChannelView: React.FC<
         </div>
 
         {/* All / Videos / Shorts Filter Tabs */}
-        <div className="mt-5 flex items-center gap-2 border-b border-neutral-200 dark:border-[#272727] pb-3">
+        <div className="mt-5 flex items-center gap-2 border-b border-[#e5e7eb] dark:border-[#2f3336] pb-3">
           {(
             [
               ['all', `All (${videos.length})`],
@@ -1405,10 +1404,10 @@ export const ChannelView: React.FC<
               key={id}
               type="button"
               onClick={() => setTab(id)}
-              className={`h-9 px-4 rounded-lg text-sm font-semibold cursor-pointer ${
+              className={`h-9 px-4 rounded-full text-sm font-bold cursor-pointer ${
                 tab === id
-                  ? 'bg-[#0f0f0f] text-white dark:bg-white dark:text-[#0f0f0f]'
-                  : 'bg-neutral-100 dark:bg-[#272727] text-[#0f0f0f] dark:text-[#f1f1f1] hover:bg-neutral-200 dark:hover:bg-[#383838]'
+                  ? 'bg-[#0f1419] text-white dark:bg-white dark:text-black'
+                  : 'bg-[#eff3f4] dark:bg-[#202327] text-[#0f1419] dark:text-[#e7e9ea] hover:bg-[#e5e7eb] dark:hover:bg-[#2f3336]'
               }`}
             >
               {label}

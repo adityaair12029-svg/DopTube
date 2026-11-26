@@ -31,17 +31,22 @@ import {
   fetchExternalFeed,
   fetchExternalFeedPaged,
   fetchExternalVideoById,
+  getDiscoveryStatus,
   getExternalApiKey,
+  runWithDiscoveryReferer,
   type DiscoveryResult,
 } from './discovery.ts';
 import {
+  buildUsernameSuggestions,
   filterAndSortVideos,
+  hashPassword,
   INDIAN_LANGUAGES,
   rankVideos,
   signSessionToken,
   validateCommentInput,
   validateCopyrightClaim,
   validateVideoInput,
+  verifyPassword,
   VIDEO_CATEGORIES,
   type RankableVideo,
 } from './domain.ts';
@@ -66,6 +71,12 @@ app.set('trust proxy', 1);
 
 app.use(securityHeaders);
 app.use(express.json({ limit: '4mb' }));
+app.use((req, _res, next) => {
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'doobtube.vercel.app';
+  const origin = req.headers.origin || req.headers.referer || `${proto}://${host}/`;
+  runWithDiscoveryReferer(String(origin), next);
+});
 app.use(attachAuth);
 
 app.get('/api/health', (_req, res) => {
@@ -73,6 +84,7 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     env: process.env.VERCEL ? 'vercel' : 'node',
     externalDiscovery: Boolean(getExternalApiKey()),
+    discoveryStatus: getDiscoveryStatus(),
   });
 });
 
@@ -235,7 +247,7 @@ function buildSignalsForUser(userId?: string) {
 
 function getUserPayload(userId: string) {
   const user = db.prepare(`
-    SELECT u.id, u.name, u.email, u.avatar_url, u.role, u.preferred_language, u.restricted_mode, u.history_paused, u.created_at,
+    SELECT u.id, u.name, u.email, u.avatar_url, u.birthday, u.role, u.preferred_language, u.restricted_mode, u.history_paused, u.created_at,
            c.id as channel_id, c.name as channel_name, c.handle as channel_handle, c.description as channel_desc, c.subscriber_count
     FROM users u
     LEFT JOIN channels c ON c.user_id = u.id
@@ -249,6 +261,7 @@ function getUserPayload(userId: string) {
     name: user.name,
     email: user.email,
     avatarUrl: user.avatar_url,
+    birthday: user.birthday || '',
     role: user.role,
     preferredLanguage: user.preferred_language,
     restrictedMode: user.restricted_mode === 1,
@@ -265,6 +278,34 @@ function getUserPayload(userId: string) {
         }
       : null,
   };
+}
+
+function createSignedUserSession(userId: string): string {
+  const u = getUserPayload(userId) as {
+    id: string;
+    role: 'user' | 'creator' | 'admin';
+    name: string;
+    email: string;
+    avatarUrl: string;
+    birthday?: string;
+    preferredLanguage: string;
+    channel?: { handle?: string } | null;
+  } | null;
+
+  return signSessionToken(
+    {
+      userId,
+      role: u?.role ?? 'creator',
+      exp: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      name: u?.name,
+      email: u?.email,
+      handle: u?.channel?.handle,
+      avatarUrl: u?.avatarUrl && !String(u.avatarUrl).startsWith('data:') ? u.avatarUrl : '',
+      preferredLanguage: u?.preferredLanguage,
+      birthday: u?.birthday,
+    },
+    getSessionSecret()
+  );
 }
 
 function logAudit(actorUserId: string | null, action: string, targetType: string, targetId: string, metadata: Record<string, unknown> = {}) {
@@ -285,6 +326,169 @@ app.get('/api/auth/me', (req: AuthedRequest, res) => {
   }
   const user = getUserPayload(req.auth.userId);
   res.json({ user });
+});
+
+app.get('/api/auth/check-username', (req, res) => {
+  const raw = String(req.query.username || '').trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_]/g, '');
+  const nameHint = String(req.query.name || '').trim();
+  const normalized = raw ? `@${raw}` : '';
+  const existing = normalized
+    ? db.prepare('SELECT id FROM channels WHERE LOWER(handle) = LOWER(?)').get(normalized)
+    : null;
+  const baseSuggestions = buildUsernameSuggestions(nameHint || raw || 'creator', raw);
+  const suggestions = baseSuggestions.filter(
+    (s) => !db.prepare('SELECT id FROM channels WHERE LOWER(handle) = LOWER(?)').get(s)
+  );
+  res.json({
+    available: Boolean(raw.length >= 3 && !existing),
+    normalized,
+    suggestions: suggestions.slice(0, 5),
+  });
+});
+
+app.post('/api/auth/register', rateLimit(20, 60_000), (req, res) => {
+  const { name, email, birthday = '', password, username, avatarDataUrl = '', interests = [] } = req.body as {
+    name?: string;
+    email?: string;
+    birthday?: string;
+    password?: string;
+    username?: string;
+    avatarDataUrl?: string;
+    interests?: string[];
+  };
+
+  const cleanName = (name || '').trim();
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const rawHandle = (username || '').trim().toLowerCase().replace(/^@+/, '').replace(/[^a-z0-9_]/g, '');
+
+  if (cleanName.length < 2 || cleanName.length > 60) {
+    res.status(400).json({ error: 'Please enter your name (2–60 characters).' });
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    res.status(400).json({ error: 'Please enter a valid email address.' });
+    return;
+  }
+  if (!password || password.length < 8) {
+    res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    return;
+  }
+  if (rawHandle.length < 3 || rawHandle.length > 24) {
+    res.status(400).json({ error: 'Username must be 3–24 letters, numbers, or underscores.' });
+    return;
+  }
+
+  if (db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(cleanEmail)) {
+    res.status(409).json({ error: 'An account with this email already exists. Try signing in instead.' });
+    return;
+  }
+
+  const handle = `@${rawHandle}`;
+  if (db.prepare('SELECT id FROM channels WHERE LOWER(handle) = LOWER(?)').get(handle)) {
+    res.status(409).json({ error: 'That username is already taken. Pick another handle.' });
+    return;
+  }
+
+  const safeAvatar =
+    typeof avatarDataUrl === 'string' && /^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(avatarDataUrl) && avatarDataUrl.length < 600_000
+      ? avatarDataUrl
+      : '';
+
+  const userId = `u_${randomUUID().slice(0, 10)}`;
+  const channelId = `ch_${randomUUID().slice(0, 10)}`;
+  const avatarUrl = safeAvatar || `/api/avatars/${channelId}.svg`;
+  const finalRole = cleanEmail === ADMIN_EMAIL ? 'admin' : 'creator';
+  const nowIso = new Date().toISOString();
+  const passwordHash = hashPassword(password);
+
+  db.prepare(`
+    INSERT INTO users (id, name, email, password_hash, avatar_url, birthday, role, preferred_language, email_verified, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'English', 1, ?)
+  `).run(userId, cleanName, cleanEmail, passwordHash, avatarUrl, birthday.trim(), finalRole, nowIso);
+
+  db.prepare(`
+    INSERT INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, '#000000', 0, 0, ?)
+  `).run(channelId, userId, cleanName, handle, `Official DopTube channel of ${cleanName}.`, avatarUrl, nowIso);
+
+  const cleanInterests = Array.isArray(interests)
+    ? interests.map((t) => String(t).trim()).filter(Boolean).slice(0, 12)
+    : [];
+
+  db.prepare(`
+    INSERT INTO user_preferences (
+      user_id, preferred_languages_json, preferred_categories_json, selected_interests_json,
+      preferred_format, personalization_enabled, infinite_scroll_enabled, autoplay_enabled,
+      onboarding_completed, updated_at
+    ) VALUES (?, '["English","Hindi"]', ?, ?, 'all', 1, 1, 1, ?, ?)
+  `).run(userId, JSON.stringify(cleanInterests), JSON.stringify(cleanInterests), cleanInterests.length >= 3 ? 1 : 0, nowIso);
+
+  const upsertInterest = db.prepare(`
+    INSERT OR REPLACE INTO user_interests (user_id, topic, score, source, updated_at)
+    VALUES (?, ?, 78, 'onboarding', ?)
+  `);
+  for (const topic of cleanInterests) {
+    upsertInterest.run(userId, topic, nowIso);
+  }
+
+  const token = createSignedUserSession(userId);
+  setSessionCookie(res, token, req);
+  logAudit(userId, 'ACCOUNT_REGISTERED', 'user', userId, { email: cleanEmail, handle });
+  res.status(201).json({ user: getUserPayload(userId), token });
+});
+
+app.post('/api/auth/login', rateLimit(25, 60_000), (req, res) => {
+  const { identifier, password } = req.body as { identifier?: string; password?: string };
+  const cleanId = (identifier || '').trim().toLowerCase();
+  if (!cleanId || !password) {
+    res.status(400).json({ error: 'Email or username and password are required.' });
+    return;
+  }
+
+  let row = db
+    .prepare('SELECT id, password_hash, email FROM users WHERE LOWER(email) = LOWER(?)')
+    .get(cleanId) as { id: string; password_hash: string; email: string } | undefined;
+
+  if (!row) {
+    const withAt = cleanId.startsWith('@') ? cleanId : `@${cleanId}`;
+    row = db
+      .prepare(`
+        SELECT u.id, u.password_hash, u.email
+        FROM channels c JOIN users u ON u.id = c.user_id
+        WHERE LOWER(c.handle) = LOWER(?)
+      `)
+      .get(withAt) as { id: string; password_hash: string; email: string } | undefined;
+  }
+
+  if (!row) {
+    res.status(401).json({ error: 'Account not found. Check your email or username.' });
+    return;
+  }
+  if (row.password_hash === 'google_oauth') {
+    res.status(400).json({ error: 'This account uses Google Sign-In. Please click Continue with Google.' });
+    return;
+  }
+  if (!verifyPassword(password, row.password_hash)) {
+    res.status(401).json({ error: 'Incorrect password.' });
+    return;
+  }
+
+  const token = createSignedUserSession(row.id);
+  setSessionCookie(res, token, req);
+  logAudit(row.id, 'PASSWORD_LOGIN', 'user', row.id, { email: row.email });
+  res.json({ user: getUserPayload(row.id), token });
+});
+
+app.post('/api/auth/avatar', requireAuth, (req: AuthedRequest, res) => {
+  const { avatarDataUrl } = req.body as { avatarDataUrl?: string };
+  if (!avatarDataUrl || !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(avatarDataUrl) || avatarDataUrl.length > 600_000) {
+    res.status(400).json({ error: 'Please select a valid image under 450 KB.' });
+    return;
+  }
+  const uid = req.auth!.userId;
+  db.prepare('UPDATE users SET avatar_url = ? WHERE id = ?').run(avatarDataUrl, uid);
+  db.prepare('UPDATE channels SET avatar_url = ? WHERE user_id = ?').run(avatarDataUrl, uid);
+  res.json({ user: getUserPayload(uid) });
 });
 
 const ADMIN_EMAIL = 'doptails@gmail.com';
@@ -341,8 +545,8 @@ app.post('/api/auth/google', rateLimit(30, 60_000), async (req, res) => {
     const avatarUrl = identity.picture || `/api/avatars/${channelId}.svg`;
 
     db.prepare(`
-      INSERT INTO users (id, firebase_uid, name, email, password_hash, avatar_url, role, preferred_language, email_verified, created_at)
-      VALUES (?, ?, ?, ?, 'google_oauth', ?, ?, 'English', 1, ?)
+      INSERT INTO users (id, firebase_uid, name, email, password_hash, avatar_url, birthday, role, preferred_language, email_verified, created_at)
+      VALUES (?, ?, ?, ?, 'google_oauth', ?, '', ?, 'English', 1, ?)
     `).run(userId, identity.uid, identity.name, normalizedEmail, avatarUrl, finalRole, nowIso);
 
     const cleanBase = identity.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 18) || 'creator';
@@ -353,7 +557,7 @@ app.post('/api/auth/google', rateLimit(30, 60_000), async (req, res) => {
 
     db.prepare(`
       INSERT INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, '#1f1f23', 0, 0, ?)
+      VALUES (?, ?, ?, ?, ?, ?, '#000000', 0, 0, ?)
     `).run(channelId, userId, identity.name, handle, `Official DopTube channel of ${identity.name}.`, avatarUrl, nowIso);
   }
 
@@ -365,18 +569,15 @@ app.post('/api/auth/google', rateLimit(30, 60_000), async (req, res) => {
     const avatarUrl = identity.picture || `/api/avatars/${channelId}.svg`;
     db.prepare(`
       INSERT INTO channels (id, user_id, name, handle, description, avatar_url, banner_color, verified, subscriber_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, '#1f1f23', 0, 0, ?)
+      VALUES (?, ?, ?, ?, ?, ?, '#000000', 0, 0, ?)
     `).run(channelId, userId, identity.name, handle, `Official DopTube channel of ${identity.name}.`, avatarUrl, nowIso);
   }
   ensureUserPreferencesRow(userId, 'English');
 
-  const token = signSessionToken(
-    { userId, role: finalRole, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 },
-    getSessionSecret()
-  );
+  const token = createSignedUserSession(userId);
   setSessionCookie(res, token, req);
   logAudit(userId, 'GOOGLE_LOGIN', 'user', userId, { email: normalizedEmail });
-  res.json({ user: getUserPayload(userId) });
+  res.json({ user: getUserPayload(userId), token });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -979,6 +1180,7 @@ app.get('/api/search', async (req: AuthedRequest, res) => {
     channels: channelMatches,
     nextPageToken: extPaged.nextPageToken,
     hasMore: Boolean(extPaged.nextPageToken),
+    discoveryStatus: getDiscoveryStatus(),
   });
 });
 

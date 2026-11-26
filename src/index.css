@@ -4,22 +4,22 @@
 @layer base {
   :root {
     --dt-bg: #ffffff;
-    --dt-surface: #f2f2f2;
-    --dt-surface-hover: #e5e5e5;
-    --dt-border: rgba(0, 0, 0, 0.1);
-    --dt-text: #0f0f0f;
-    --dt-text-muted: #606060;
-    --dt-accent: #ff0033;
+    --dt-surface: #eff3f4;
+    --dt-surface-hover: #e5e7eb;
+    --dt-border: #e5e7eb;
+    --dt-text: #0f1419;
+    --dt-text-muted: #536471;
+    --dt-accent: #0f1419;
   }
 
   .dark {
-    --dt-bg: #0f0f0f;
-    --dt-surface: #272727;
-    --dt-surface-hover: #3f3f3f;
-    --dt-border: rgba(255, 255, 255, 0.12);
-    --dt-text: #f1f1f1;
-    --dt-text-muted: #aaaaaa;
-    --dt-accent: #ff0033;
+    --dt-bg: #000000;
+    --dt-surface: #16181c;
+    --dt-surface-hover: #202327;
+    --dt-border: #2f3336;
+    --dt-text: #e7e9ea;
+    --dt-text-muted: #71767b;
+    --dt-accent: #ffffff;
   }
 
   html {

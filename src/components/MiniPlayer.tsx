@@ -24,7 +24,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ video, onExpand, onClose
   };
 
   return (
-    <div className="fixed bottom-16 md:bottom-5 right-4 z-40 w-72 sm:w-80 rounded-xl bg-white dark:bg-[#212121] border border-neutral-200 dark:border-[#383838] shadow-2xl overflow-hidden">
+    <div className="fixed bottom-16 md:bottom-5 right-4 z-40 w-72 sm:w-80 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] shadow-2xl overflow-hidden">
       <div className="relative aspect-video bg-black group">
         {video.sourceType === 'external' && video.externalEmbedUrl ? (
           <iframe
@@ -32,7 +32,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ video, onExpand, onClose
             src={video.externalEmbedUrl}
             title={video.title}
             className="w-full h-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
           />
         ) : (
@@ -81,14 +81,14 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({ video, onExpand, onClose
           onClick={() => onExpand(video.id)}
           className="text-left min-w-0 flex-1 cursor-pointer"
         >
-          <p className="text-xs font-semibold truncate text-[#0f0f0f] dark:text-[#f1f1f1]">{video.title}</p>
-          <p className="text-[11px] text-[#606060] dark:text-[#aaaaaa] truncate">{video.channelName}</p>
+          <p className="text-xs font-semibold truncate text-[#0f1419] dark:text-[#e7e9ea]">{video.title}</p>
+          <p className="text-[11px] text-[#536471] dark:text-[#71767b] truncate">{video.channelName}</p>
         </button>
         <button
           type="button"
           onClick={onClose}
           aria-label="Dismiss miniplayer"
-          className="p-1 rounded-full hover:bg-neutral-200 dark:hover:bg-[#383838] cursor-pointer"
+          className="p-1 rounded-full hover:bg-[#eff3f4] dark:hover:bg-[#202327] cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>

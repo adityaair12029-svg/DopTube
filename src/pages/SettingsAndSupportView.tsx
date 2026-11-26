@@ -165,62 +165,92 @@ export const SettingsView: React.FC<{
       <h1 className="text-2xl font-bold">Settings</h1>
 
       {/* Appearance & Playback */}
-      <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e] space-y-4">
-        <h2 className="font-semibold text-base">Appearance & Playback</h2>
+      <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] space-y-4">
+        <h2 className="font-bold text-base">Appearance & Playback</h2>
 
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-medium">Theme</p>
-            <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Switch between DopTube Dark and Light themes</p>
+            <p className="text-sm font-semibold">Theme</p>
+            <p className="text-xs text-[#536471] dark:text-[#71767b]">
+              Choose between pure X Dark (#000000) and clean Light (#FFFFFF)
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={onToggleTheme}
-            className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] hover:bg-neutral-200 dark:hover:bg-[#383838] text-sm font-medium flex items-center gap-2 cursor-pointer"
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-            <span>{theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (theme !== 'dark') onToggleTheme();
+              }}
+              aria-pressed={theme === 'dark'}
+              className={`h-9 px-4 rounded-full text-xs font-bold flex items-center gap-2 border whitespace-nowrap shrink-0 cursor-pointer ${
+                theme === 'dark'
+                  ? 'bg-white text-black border-white'
+                  : 'bg-[#eff3f4] text-[#0f1419] border-[#e5e7eb] hover:bg-[#e5e7eb]'
+              }`}
+            >
+              <Moon className="w-3.5 h-3.5 shrink-0" />
+              <span>Lights out (Black)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (theme !== 'light') onToggleTheme();
+              }}
+              aria-pressed={theme === 'light'}
+              className={`h-9 px-4 rounded-full text-xs font-bold flex items-center gap-2 border whitespace-nowrap shrink-0 cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-[#0f1419] text-white border-[#0f1419]'
+                  : 'bg-[#202327] text-[#e7e9ea] border-[#2f3336] hover:bg-[#2f3336]'
+              }`}
+            >
+              <Sun className="w-3.5 h-3.5 shrink-0" />
+              <span>Light (White)</span>
+            </button>
+          </div>
         </div>
 
         {user && prefs && (
           <>
-            <div className="flex items-center justify-between gap-4 pt-3 border-t border-neutral-200 dark:border-[#272727]">
+            <div className="flex items-center justify-between gap-4 pt-3 border-t border-[#e5e7eb] dark:border-[#2f3336]">
               <div>
                 <p className="text-sm font-medium">Infinite Scroll Feed</p>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">
+                <p className="text-xs text-[#536471] dark:text-[#71767b]">
                   Automatically loads continuous videos across Home, Shorts, Search, and Channel pages
                 </p>
               </div>
-              <span className="h-8 px-4 rounded-full text-xs font-semibold bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] inline-flex items-center">
+              <span className="h-8 px-4 rounded-full text-xs font-bold bg-[#0f1419] dark:bg-white text-white dark:text-black inline-flex items-center shrink-0">
                 Always On
               </span>
             </div>
 
-            <div className="flex items-center justify-between gap-4 pt-3 border-t border-neutral-200 dark:border-[#272727]">
+            <div className="flex items-center justify-between gap-4 pt-3 border-t border-[#e5e7eb] dark:border-[#2f3336]">
               <div>
                 <p className="text-sm font-medium">Autoplay Next Video</p>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Automatically play the next recommended or queued video after 5s countdown</p>
+                <p className="text-xs text-[#536471] dark:text-[#71767b]">
+                  Automatically play the next recommended or queued video after 5s countdown
+                </p>
               </div>
               <button
                 type="button"
                 role="switch"
                 aria-checked={prefs.autoplayEnabled}
                 onClick={() => patchPref({ autoplayEnabled: !prefs.autoplayEnabled })}
-                className={`h-8 px-4 rounded-full text-xs font-semibold cursor-pointer ${
+                className={`h-8 px-4 rounded-full text-xs font-bold cursor-pointer ${
                   prefs.autoplayEnabled
-                    ? 'bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f]'
-                    : 'bg-neutral-100 dark:bg-[#272727]'
+                    ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                    : 'bg-[#eff3f4] dark:bg-[#202327]'
                 }`}
               >
                 {prefs.autoplayEnabled ? 'On' : 'Off'}
               </button>
             </div>
 
-            <div className="flex items-center justify-between gap-4 pt-3 border-t border-neutral-200 dark:border-[#272727]">
+            <div className="flex items-center justify-between gap-4 pt-3 border-t border-[#e5e7eb] dark:border-[#2f3336]">
               <div>
                 <p className="text-sm font-medium">Restricted Mode</p>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">Hide potentially mature content from feeds and search</p>
+                <p className="text-xs text-[#536471] dark:text-[#71767b]">
+                  Hide potentially mature content from feeds and search
+                </p>
               </div>
               <button
                 type="button"
@@ -235,10 +265,10 @@ export const SettingsView: React.FC<{
                   onPreferencesUpdated();
                   onToast(`Restricted Mode ${res.user.restrictedMode ? 'enabled' : 'disabled'}`);
                 }}
-                className={`h-8 px-4 rounded-full text-xs font-semibold cursor-pointer ${
+                className={`h-8 px-4 rounded-full text-xs font-bold cursor-pointer ${
                   user.restrictedMode
-                    ? 'bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f]'
-                    : 'bg-neutral-100 dark:bg-[#272727]'
+                    ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                    : 'bg-[#eff3f4] dark:bg-[#202327]'
                 }`}
               >
                 {user.restrictedMode ? 'On' : 'Off'}
@@ -249,23 +279,23 @@ export const SettingsView: React.FC<{
       </section>
 
       {!user ? (
-        <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e]">
-          <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mb-3">
-            Sign in with Google to customize your Indian language preferences, DopTube AI topic weights, blocked topics/creators, and data privacy controls.
+        <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
+          <p className="text-sm text-[#536471] dark:text-[#71767b] mb-3">
+            Sign in to customize your Indian language preferences, DopTube AI topic weights, blocked topics/creators, and data privacy controls.
           </p>
           <button
             type="button"
             onClick={onOpenAuth}
-            className="h-9 px-5 rounded-full bg-[#ff0033] text-white text-sm font-semibold cursor-pointer"
+            className="h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
           >
-            Sign in with Google
+            Sign in
           </button>
         </section>
       ) : (
         <>
           {/* Profile & Language */}
-          <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e]">
-            <h2 className="font-semibold text-base mb-3">Profile & Language Discovery</h2>
+          <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
+            <h2 className="font-bold text-base mb-3">Profile & Language Discovery</h2>
             <form onSubmit={saveProfileAndLang} className="space-y-3">
               <div>
                 <label className="block text-xs font-medium mb-1">Display Name</label>
@@ -273,7 +303,7 @@ export const SettingsView: React.FC<{
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                  className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] text-sm focus:outline-none focus:border-[#0f1419] dark:focus:border-white"
                 />
               </div>
               <div>
@@ -281,7 +311,7 @@ export const SettingsView: React.FC<{
                 <select
                   value={lang}
                   onChange={(e) => setLang(e.target.value)}
-                  className="w-full h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                  className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] text-sm focus:outline-none focus:border-[#0f1419] dark:focus:border-white"
                 >
                   {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((l) => (
                     <option key={l} value={l}>
@@ -292,7 +322,7 @@ export const SettingsView: React.FC<{
               </div>
               <button
                 type="submit"
-                className="h-9 px-4 rounded-full bg-[#0f0f0f] dark:bg-white text-white dark:text-[#0f0f0f] text-xs font-semibold cursor-pointer"
+                className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-bold cursor-pointer"
               >
                 Save profile & language
               </button>
@@ -300,14 +330,14 @@ export const SettingsView: React.FC<{
           </section>
 
           {/* AI Personalization & Interest Profile */}
-          <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e] space-y-5">
+          <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] space-y-5">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="font-semibold text-base flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-[#ff0033]" />
+                <h2 className="font-bold text-base flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4" />
                   <span>AI Personalization & Interest Weights</span>
                 </h2>
-                <p className="text-xs text-[#606060] dark:text-[#aaaaaa] mt-0.5">
+                <p className="text-xs text-[#536471] dark:text-[#71767b] mt-0.5">
                   Adjust topic scores or turn off personalization to see non-personalized trending feeds.
                 </p>
               </div>
@@ -317,10 +347,10 @@ export const SettingsView: React.FC<{
                   role="switch"
                   aria-checked={prefs.personalizationEnabled}
                   onClick={() => patchPref({ personalizationEnabled: !prefs.personalizationEnabled })}
-                  className={`h-8 px-4 rounded-full text-xs font-semibold shrink-0 cursor-pointer ${
+                  className={`h-8 px-4 rounded-full text-xs font-bold shrink-0 cursor-pointer ${
                     prefs.personalizationEnabled
-                      ? 'bg-[#ff0033] text-white'
-                      : 'bg-neutral-100 dark:bg-[#272727]'
+                      ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                      : 'bg-[#eff3f4] dark:bg-[#202327]'
                   }`}
                 >
                   {prefs.personalizationEnabled ? 'Personalized' : 'Paused'}
@@ -334,11 +364,11 @@ export const SettingsView: React.FC<{
                 value={newInterest}
                 onChange={(e) => setNewInterest(e.target.value)}
                 placeholder="Add topic (e.g. Physics, Cricket, Carnatic Music)..."
-                className="flex-1 h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                className="flex-1 h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] text-sm focus:outline-none focus:border-[#0f1419] dark:focus:border-white"
               />
               <button
                 type="submit"
-                className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                className="h-10 px-4 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-bold flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add topic
@@ -346,7 +376,7 @@ export const SettingsView: React.FC<{
             </form>
 
             {interests.length === 0 ? (
-              <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">
+              <p className="text-xs text-[#536471] dark:text-[#71767b]">
                 No interest weights recorded yet. Watch videos or add a topic above.
               </p>
             ) : (
@@ -355,7 +385,7 @@ export const SettingsView: React.FC<{
                   <div key={item.topic} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-medium">{item.topic}</span>
-                      <span className="font-mono-nums text-[#606060] dark:text-[#aaaaaa]">{item.score}%</span>
+                      <span className="font-mono-nums text-[#536471] dark:text-[#71767b]">{item.score}%</span>
                     </div>
                     <input
                       type="range"
@@ -363,7 +393,7 @@ export const SettingsView: React.FC<{
                       max={100}
                       value={item.score}
                       onChange={(e) => updateInterestScore(item.topic, Number(e.target.value))}
-                      className="w-full accent-[#ff0033] cursor-pointer"
+                      className="w-full accent-[#0f1419] dark:accent-white cursor-pointer"
                     />
                   </div>
                 ))}
@@ -371,7 +401,7 @@ export const SettingsView: React.FC<{
             )}
 
             {/* Blocked Topics */}
-            <div className="pt-4 border-t border-neutral-200 dark:border-[#272727] space-y-2.5">
+            <div className="pt-4 border-t border-[#e5e7eb] dark:border-[#2f3336] space-y-2.5">
               <p className="text-sm font-medium">Blocked Topics</p>
               <form onSubmit={addBlockedTopic} className="flex gap-2">
                 <input
@@ -379,11 +409,11 @@ export const SettingsView: React.FC<{
                   value={newBlockedTopic}
                   onChange={(e) => setNewBlockedTopic(e.target.value)}
                   placeholder="Block a topic from your recommendations..."
-                  className="flex-1 h-9 px-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+                  className="flex-1 h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] text-sm focus:outline-none"
                 />
                 <button
                   type="submit"
-                  className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-semibold cursor-pointer"
+                  className="h-10 px-4 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-bold cursor-pointer"
                 >
                   Block
                 </button>
@@ -393,7 +423,7 @@ export const SettingsView: React.FC<{
                   {blockedTopics.map((bt) => (
                     <span
                       key={bt.topic}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs"
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs"
                     >
                       <span>{bt.topic}</span>
                       <button
@@ -412,22 +442,22 @@ export const SettingsView: React.FC<{
 
             {/* Blocked Creators */}
             {blockedCreators.length > 0 && (
-              <div className="pt-4 border-t border-neutral-200 dark:border-[#272727] space-y-2">
+              <div className="pt-4 border-t border-[#e5e7eb] dark:border-[#2f3336] space-y-2">
                 <p className="text-sm font-medium">Hidden Creators</p>
                 <div className="space-y-1.5">
                   {blockedCreators.map((bc) => (
                     <div
                       key={bc.channelId}
-                      className="flex items-center justify-between p-2.5 rounded-lg bg-neutral-100 dark:bg-[#1a1a1a] text-xs"
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-[#eff3f4] dark:bg-black text-xs"
                     >
                       <span className="flex items-center gap-2 font-medium">
-                        <Ban className="w-3.5 h-3.5 text-[#ff0033]" />
+                        <Ban className="w-3.5 h-3.5" />
                         {bc.channelName}
                       </span>
                       <button
                         type="button"
                         onClick={() => unblockCreator(bc.channelId)}
-                        className="text-[#065fd4] dark:text-[#3ea6ff] font-medium hover:underline cursor-pointer"
+                        className="font-bold hover:underline cursor-pointer"
                       >
                         Allow again
                       </button>
@@ -439,16 +469,16 @@ export const SettingsView: React.FC<{
           </section>
 
           {/* Data & Privacy Controls */}
-          <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e] space-y-3">
-            <h2 className="font-semibold text-base">Data & Privacy</h2>
-            <p className="text-xs text-[#606060] dark:text-[#aaaaaa]">
+          <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] space-y-3">
+            <h2 className="font-bold text-base">Data & Privacy</h2>
+            <p className="text-xs text-[#536471] dark:text-[#71767b]">
               DopTube stores only explicit behavior signals you control. Manage, export, or reset your data anytime.
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <button
                 type="button"
                 onClick={clearWatchHistory}
-                className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                className="h-9 px-4 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Clear watch history</span>
@@ -456,7 +486,7 @@ export const SettingsView: React.FC<{
               <button
                 type="button"
                 onClick={resetRecommendations}
-                className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                className="h-9 px-4 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Reset AI recommendation signals</span>
@@ -464,7 +494,7 @@ export const SettingsView: React.FC<{
               <button
                 type="button"
                 onClick={exportUserData}
-                className="h-9 px-4 rounded-full bg-neutral-100 dark:bg-[#272727] text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                className="h-9 px-4 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Download my data (JSON)</span>
@@ -527,15 +557,15 @@ export const HelpAndSupportView: React.FC<{ onToast: (msg: string) => void }> = 
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 pb-24 space-y-6">
       <h1 className="text-2xl font-bold">DopTube Help, Copyright & Support</h1>
 
-      <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e] space-y-2 text-sm">
-        <h2 className="font-semibold text-base">Creator Ownership & Indian Legal Compliance</h2>
-        <p className="text-[#606060] dark:text-[#aaaaaa]">
+      <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] space-y-2 text-sm">
+        <h2 className="font-bold text-base">Creator Ownership & Indian Legal Compliance</h2>
+        <p className="text-[#536471] dark:text-[#71767b]">
           DopTube respects the Information Technology Act and Copyright Act of India. Creators must only upload original or duly licensed content. Rights holders can file a formal takedown notice from any video’s Report menu.
         </p>
       </section>
 
-      <section className="p-5 rounded-xl border border-neutral-200 dark:border-[#2e2e2e]">
-        <h2 className="font-semibold text-base mb-3">Send Platform Feedback</h2>
+      <section className="p-5 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]">
+        <h2 className="font-bold text-base mb-3">Send Platform Feedback</h2>
         {sent && (
           <p className="mb-3 text-xs text-emerald-500 font-medium">
             Your feedback has been logged with the DopTube product team.
@@ -548,11 +578,11 @@ export const HelpAndSupportView: React.FC<{ onToast: (msg: string) => void }> = 
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             placeholder="Share a bug report, Indian language request, or feature idea..."
-            className="w-full p-3 rounded-lg bg-neutral-100 dark:bg-[#121212] border border-neutral-300 dark:border-[#383838] text-sm"
+            className="w-full p-3 rounded-lg bg-[#eff3f4] dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] text-sm focus:outline-none focus:border-[#0f1419] dark:focus:border-white"
           />
           <button
             type="submit"
-            className="h-9 px-5 rounded-full bg-[#ff0033] text-white text-sm font-semibold cursor-pointer"
+            className="h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
           >
             Send feedback
           </button>
