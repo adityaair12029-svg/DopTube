@@ -64,8 +64,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItemClass = (active: boolean) =>
     `w-full flex items-center gap-5 px-3 h-10 rounded-full text-[14px] transition-colors cursor-pointer whitespace-nowrap ${
       active
-        ? 'bg-[#eff3f4] dark:bg-[#16181c] font-bold text-[#0f1419] dark:text-white'
-        : 'text-[#0f1419] dark:text-[#e7e9ea] hover:bg-[#eff3f4] dark:hover:bg-[#16181c]'
+        ? 'bg-[#eff3f4] dark:bg-[#0f172e] font-bold text-[#1d4ed8] dark:text-white border border-[#dbeafe] dark:border-[#2563eb]/40'
+        : 'text-[#0f1419] dark:text-[#e7e9ea] hover:bg-[#eff3f4] dark:hover:bg-[#101524]'
     }`;
 
   const renderExpandedContent = (isMobileDrawer = false) => {
@@ -312,7 +312,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <>
       {/* Desktop Sidebar */}
       <aside
-        className={`hidden md:block fixed top-14 left-0 bottom-0 z-30 bg-white dark:bg-black border-r border-[#e5e7eb] dark:border-[#2f3336] transition-all duration-150 ${
+        className={`hidden md:block fixed top-14 left-0 bottom-0 z-30 bg-white dark:bg-[#040712] border-r border-[#e5e7eb] dark:border-[#1e2638] transition-all duration-150 ${
           expanded ? 'w-60' : 'w-[72px]'
         }`}
       >
@@ -364,7 +364,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Mobile Bottom Navigation (4-Tab Bar matching mobile screenshots: Home, Shorts, +, You) */}
       <nav
         aria-label="Mobile quick navigation"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-white dark:bg-black border-t border-[#e5e7eb] dark:border-[#2f3336] flex items-center justify-around px-2"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-30 h-14 bg-white/95 dark:bg-[#050814]/95 backdrop-blur-md border-t border-[#e5e7eb] dark:border-[#1e2638] flex items-center justify-around px-2"
       >
         <button
           type="button"

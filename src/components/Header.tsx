@@ -173,7 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
   const unreadCount = notifications.filter((n) => n.isRead === 0).length;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-white dark:bg-black px-2 sm:px-4 flex items-center justify-between gap-1.5 sm:gap-4 border-b border-[#e5e7eb] dark:border-[#2f3336]">
+    <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-white/95 dark:bg-[#050814]/95 backdrop-blur-md px-2 sm:px-4 flex items-center justify-between gap-1.5 sm:gap-4 border-b border-[#e5e7eb] dark:border-[#1e2638]">
       {/* Left Zone: Hamburger + DopTube Logo */}
       {!mobileSearchOpen && (
         <div className="flex items-center gap-1 sm:gap-3 shrink-0">
@@ -223,9 +223,9 @@ export const Header: React.FC<HeaderProps> = ({
           <div
             className={`flex flex-1 items-center h-10 rounded-l-full border transition-colors ${
               searchFocused
-                ? 'border-[#0f1419] dark:border-white pl-4'
+                ? 'border-[#1d4ed8] dark:border-[#38bdf8] pl-4'
                 : 'border-[#cfd9de] dark:border-[#2f3336] pl-4'
-            } bg-[#eff3f4] dark:bg-[#202327]`}
+            } bg-[#eff3f4] dark:bg-[#101524]`}
           >
             {searchFocused && <Search className="w-4 h-4 text-[#536471] dark:text-[#71767b] mr-2.5 shrink-0" />}
             <input
@@ -416,7 +416,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Bell className="w-5 h-5" />
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-[10px] font-bold flex items-center justify-center font-mono-nums">
+                <span className="absolute top-1.5 right-1 min-w-[17px] h-[17px] px-1 rounded-full jio-gradient text-white text-[10px] font-bold flex items-center justify-center font-mono-nums shadow-sm">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -485,7 +485,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenAuth}
-              className="h-8 sm:h-9 px-3.5 sm:px-4 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black hover:opacity-90 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-opacity whitespace-nowrap shrink-0 cursor-pointer"
+              className="h-8 sm:h-9 px-3.5 sm:px-4 rounded-full jio-gradient text-white hover:opacity-95 text-xs sm:text-sm font-bold flex items-center gap-1.5 transition-opacity whitespace-nowrap shrink-0 cursor-pointer shadow-[0_2px_14px_rgba(37,99,235,0.35)]"
             >
               <User className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span>Sign in</span>

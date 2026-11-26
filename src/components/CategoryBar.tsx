@@ -22,12 +22,12 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-black px-3 sm:px-0 py-2 flex items-center gap-2 border-b border-[#e5e7eb] dark:border-[#2f3336]">
+    <div className="bg-transparent px-3 sm:px-0 py-2 flex items-center gap-2 border-b border-[#e5e7eb] dark:border-[#1e2638]">
       <button
         type="button"
         onClick={() => scrollBy(-240)}
         aria-label="Scroll categories left"
-        className="hidden sm:flex w-8 h-8 rounded-full items-center justify-center hover:bg-[#eff3f4] dark:hover:bg-[#16181c] shrink-0 cursor-pointer"
+        className="hidden sm:flex w-8 h-8 rounded-full items-center justify-center hover:bg-[#eff3f4] dark:hover:bg-[#101524] shrink-0 cursor-pointer"
       >
         <ChevronLeft className="w-4 h-4" />
       </button>
@@ -40,10 +40,10 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
               key={cat}
               type="button"
               onClick={() => onSelectCategory(cat)}
-              className={`h-8 px-3.5 rounded-full text-[13px] font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+              className={`h-8 px-3.5 rounded-full text-[13px] font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
                 active
-                  ? 'bg-[#0f1419] text-white dark:bg-white dark:text-black'
-                  : 'bg-[#eff3f4] text-[#0f1419] hover:bg-neutral-200 dark:bg-[#202327] dark:text-[#e7e9ea] dark:hover:bg-[#2f3336]'
+                  ? 'jio-gradient text-white shadow-[0_2px_12px_rgba(124,58,237,0.35)]'
+                  : 'bg-[#eff3f4] text-[#0f1419] hover:bg-neutral-200 dark:bg-[#141926] dark:text-[#e7e9ea] dark:hover:bg-[#1d2538] border border-transparent dark:border-[#232b3e]'
               }`}
             >
               {cat}

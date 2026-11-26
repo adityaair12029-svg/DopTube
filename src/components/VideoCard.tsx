@@ -101,12 +101,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       </button>
 
       {video.isLive ? (
-        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/85 text-white text-[11px] font-semibold tracking-wide flex items-center gap-1 pointer-events-none">
+        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-gradient-to-r from-rose-600 to-pink-600 text-white text-[11px] font-bold tracking-wide flex items-center gap-1 pointer-events-none shadow">
           <Radio className="w-3 h-3" />
           LIVE
         </span>
       ) : video.isShort ? (
-        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-black/85 text-white text-[10px] font-bold tracking-wider flex items-center gap-1 pointer-events-none shadow">
+        <span className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded jio-gradient text-white text-[10px] font-bold tracking-wider flex items-center gap-1 pointer-events-none shadow">
           <Zap className="w-2.5 h-2.5 fill-white" />
           SHORTS
         </span>
@@ -117,8 +117,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       )}
 
       {progressPct > 0 && (
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/30 pointer-events-none">
-          <div className="h-full bg-white" style={{ width: `${progressPct}%` }} />
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/25 pointer-events-none">
+          <div className="h-full jio-gradient" style={{ width: `${progressPct}%` }} />
         </div>
       )}
     </div>
@@ -274,7 +274,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             className="mt-1 flex items-center gap-1 text-[12px] text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white cursor-pointer"
           >
             <span className="truncate">{video.channelName}</span>
-            {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
+            {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#1d4ed8] dark:text-[#38bdf8]" />}
           </button>
           <p className="text-[12px] text-[#536471] dark:text-[#71767b] font-mono-nums">
             {formatViews(video.views)} views · {formatRelativeTime(video.createdAt)}
@@ -313,7 +313,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 className="w-6 h-6 rounded-full object-cover"
               />
               <span className="truncate font-medium">{video.channelName}</span>
-              {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
+              {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#1d4ed8] dark:text-[#38bdf8]" />}
             </button>
             <p className="text-[13px] text-[#536471] dark:text-[#71767b] line-clamp-2 leading-relaxed">
               {video.description}
@@ -359,7 +359,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             className="mt-1 flex items-center gap-1 text-[13px] text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white cursor-pointer"
           >
             <span className="truncate">{video.channelName}</span>
-            {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
+            {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#1d4ed8] dark:text-[#38bdf8]" />}
           </button>
 
           <p className="text-[13px] text-[#536471] dark:text-[#71767b] font-mono-nums">

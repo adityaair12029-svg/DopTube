@@ -202,7 +202,23 @@ export function scoreCandidate(
     freshnessBoost * weights.freshnessBoost +
     explorationDiversity * weights.explorationDiversity;
 
-  return Number((weighted * 100).toFixed(3));
+  let finalScore = weighted * 100;
+
+  // Prevent unrelated low-view native uploads by other creators from jumping to slot #1 of another user's feed
+  const isOtherLowViewNative =
+    video.sourceType === 'native' &&
+    video.views < 25 &&
+    (!ctx.userId || video.ownerUserId !== ctx.userId) &&
+    !ctx.subscribedChannelIds.has(video.channelId) &&
+    interestHits === 0 &&
+    !ctx.preferredCategories.includes(video.category) &&
+    !ctx.recentSearches.some((term) => term.length >= 2 && haystack.includes(term.toLowerCase()));
+
+  if (isOtherLowViewNative) {
+    finalScore -= 24;
+  }
+
+  return Number(Math.max(0, finalScore).toFixed(3));
 }
 
 export function diversifyFeed<T extends { channelId: string; category: string }>(items: T[], maxConsecutiveCreator = 1, maxConsecutiveCategory = 2): T[] {
@@ -420,3 +436,75 @@ export function buildConditionalSections(params: {
 
   return sections;
 }
+
+export interface DailyViewPoint {
+  date: string;
+  label: string;
+  views: number;
+}
+
+export function computeViewsLast30Days(params: {
+  events: Array<{ createdAt: string }>;
+  history: Array<{ watchedAt: string }>;
+  videos: Array<{ createdAt: string; views: number }>;
+  nowMs?: number;
+}): DailyViewPoint[] {
+  const now = params.nowMs ?? Date.now();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const buckets = new Map<string, number>();
+  const orderedDates: string[] = [];
+
+  for (let offset = 29; offset >= 0; offset--) {
+    const d = new Date(now - offset * DAY_MS);
+    const iso = d.toISOString().slice(0, 10);
+    orderedDates.push(iso);
+    buckets.set(iso, 0);
+  }
+
+  let trackedCount = 0;
+  for (const ev of params.events) {
+    const day = (ev.createdAt || '').slice(0, 10);
+    if (buckets.has(day)) {
+      buckets.set(day, (buckets.get(day) ?? 0) + 1);
+      trackedCount += 1;
+    }
+  }
+
+  for (const h of params.history) {
+    const day = (h.watchedAt || '').slice(0, 10);
+    if (buckets.has(day)) {
+      buckets.set(day, (buckets.get(day) ?? 0) + 1);
+      trackedCount += 1;
+    }
+  }
+
+  const totalVideoViews = params.videos.reduce((acc, v) => acc + Math.max(0, v.views || 0), 0);
+  const untrackedViews = Math.max(0, totalVideoViews - trackedCount);
+  if (untrackedViews > 0) {
+    let remaining = untrackedViews;
+    for (const v of params.videos) {
+      const day = (v.createdAt || '').slice(0, 10);
+      const share = Math.min(remaining, Math.max(0, v.views || 0));
+      if (share > 0 && buckets.has(day)) {
+        buckets.set(day, (buckets.get(day) ?? 0) + share);
+        remaining -= share;
+      }
+    }
+    if (remaining > 0) {
+      const todayKey = orderedDates[orderedDates.length - 1];
+      buckets.set(todayKey, (buckets.get(todayKey) ?? 0) + remaining);
+    }
+  }
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return orderedDates.map((iso) => {
+    const [, mm, dd] = iso.split('-');
+    const monthLabel = monthNames[Math.max(0, Number(mm) - 1)] || mm;
+    return {
+      date: iso,
+      label: `${monthLabel} ${Number(dd)}`,
+      views: buckets.get(iso) ?? 0,
+    };
+  });
+}
+

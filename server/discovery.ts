@@ -65,7 +65,13 @@ export function getDiscoveryStatus() {
   const configured = Boolean(getExternalApiKey());
   return {
     configured,
-    issue: configured ? lastDiscoveryIssue : { code: 'missing_api_key', message: 'External video discovery API key is not configured on the server.', at: new Date().toISOString() },
+    issue: configured
+      ? lastDiscoveryIssue
+      : {
+          code: 'missing_api_key',
+          message: 'External video discovery API key is not configured on the server.',
+          at: new Date().toISOString(),
+        },
   };
 }
 
@@ -78,12 +84,35 @@ function getEffectiveReferer(): string {
 }
 
 async function discoveryFetch(url: string, timeoutMs = 6500): Promise<Response> {
-  const resp = await fetch(url, {
+  const candidateReferers: Array<string | null> = Array.from(
+    new Set([
+      getEffectiveReferer(),
+      null,
+      'https://doobtube.vercel.app/',
+      'https://doptube.vercel.app/',
+    ])
+  );
+
+  let resp = await fetch(url, {
     signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      Referer: getEffectiveReferer(),
-    },
+    headers: candidateReferers[0] ? { Referer: candidateReferers[0] } : undefined,
   });
+
+  if (resp.status === 403) {
+    for (let i = 1; i < candidateReferers.length; i++) {
+      const ref = candidateReferers[i];
+      const retryResp = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: ref ? { Referer: ref } : undefined,
+      });
+      if (retryResp.ok) {
+        lastDiscoveryIssue = null;
+        return retryResp;
+      }
+      resp = retryResp;
+    }
+  }
+
   if (!resp.ok) {
     let reason = `HTTP ${resp.status}`;
     try {
@@ -369,12 +398,54 @@ async function enrichVideoIds(
   }
 }
 
+export function buildPersonalizedDiscoveryQuery(opts: {
+  interestTopics?: string[];
+  recentSearches?: string[];
+  preferredLanguage?: string;
+  shorts?: boolean;
+  seed?: number;
+}): string {
+  const terms: string[] = [];
+  const searches = (opts.recentSearches ?? []).map((s) => s.trim()).filter((s) => s.length >= 2);
+  const interests = (opts.interestTopics ?? []).map((s) => s.trim()).filter((s) => s.length >= 2);
+  const seed = Math.abs(Math.floor(opts.seed ?? 0));
+
+  if (searches.length > 0 && (seed % 2 === 0 || interests.length === 0)) {
+    terms.push(searches[seed % searches.length]);
+  }
+  if (interests.length > 0) {
+    const picked = interests[seed % interests.length];
+    if (!terms.some((t) => t.toLowerCase() === picked.toLowerCase())) {
+      terms.push(picked);
+    }
+  }
+  if (opts.preferredLanguage && opts.preferredLanguage !== 'All' && opts.preferredLanguage !== 'English') {
+    terms.push(opts.preferredLanguage);
+  }
+  if (terms.length === 0) {
+    const rotatingDefaults = opts.shorts
+      ? ['Cricket highlights', 'Tech tips', 'Standup comedy', 'Indian street food', 'Science facts', 'Bollywood music']
+      : ['India latest', 'Tech reviews India', 'Cricket highlights', 'Science documentary', 'Music hits India'];
+    terms.push(rotatingDefaults[seed % rotatingDefaults.length]);
+  }
+  if (opts.shorts) {
+    terms.push('#shorts');
+  } else if (!terms.some((t) => t.toLowerCase().includes('india'))) {
+    terms.push('India');
+  }
+  return terms.join(' ').trim();
+}
+
 export async function fetchExternalFeedPaged(params: {
   category?: string;
   language?: string;
   trending?: boolean;
   shorts?: boolean;
   pageToken?: string;
+  interestTopics?: string[];
+  recentSearches?: string[];
+  preferredLanguage?: string;
+  refreshSeed?: number;
 }): Promise<PagedDiscoveryResult> {
   const apiKey = getExternalApiKey();
   if (!apiKey) return { items: [], nextPageToken: null };
@@ -382,7 +453,13 @@ export async function fetchExternalFeedPaged(params: {
   const category = params.category || 'All';
   const language = params.language || 'All';
   const pageToken = (params.pageToken || '').trim();
-  const cacheKey = `feed_paged:${category}:${language}:${Boolean(params.trending)}:${Boolean(params.shorts)}:${pageToken}`;
+  const hasSignals = (params.interestTopics?.length ?? 0) > 0 || (params.recentSearches?.length ?? 0) > 0;
+  const seed = params.refreshSeed ?? 0;
+  const personalizedTag = hasSignals
+    ? `${(params.interestTopics ?? []).slice(0, 2).join(',')}|${(params.recentSearches ?? []).slice(0, 2).join(',')}|${seed}`
+    : `${seed}`;
+
+  const cacheKey = `feed_paged:${category}:${language}:${Boolean(params.trending)}:${Boolean(params.shorts)}:${pageToken}:${personalizedTag}`;
   const cached = getCached<PagedDiscoveryResult>(cacheKey);
   if (cached) return cached;
 
@@ -390,10 +467,19 @@ export async function fetchExternalFeedPaged(params: {
     const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
 
     if (params.shorts) {
-      const q = encodeURIComponent(
-        `India ${language !== 'All' ? language : ''} ${category !== 'All' ? category : ''} #shorts`.trim()
-      );
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=short&regionCode=IN&maxResults=20${tokenParam}&q=${q}&key=${encodeURIComponent(apiKey)}`;
+      const dynamicQuery =
+        category === 'All' && language === 'All'
+          ? buildPersonalizedDiscoveryQuery({
+              interestTopics: params.interestTopics,
+              recentSearches: params.recentSearches,
+              preferredLanguage: params.preferredLanguage,
+              shorts: true,
+              seed,
+            })
+          : `India ${language !== 'All' ? language : ''} ${category !== 'All' ? category : ''} #shorts`.trim();
+
+      const orderParam = seed % 2 === 1 && !pageToken ? '&order=date' : '&order=relevance';
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&videoDuration=short&regionCode=IN&maxResults=20${orderParam}${tokenParam}&q=${encodeURIComponent(dynamicQuery)}&key=${encodeURIComponent(apiKey)}`;
       const resp = await discoveryFetch(url, 6500);
       if (!resp.ok) {
         return { items: [], nextPageToken: null };
@@ -412,24 +498,71 @@ export async function fetchExternalFeedPaged(params: {
     }
 
     if (category === 'All' && language === 'All') {
-      const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&chart=mostPopular&regionCode=IN&maxResults=24${tokenParam}&key=${encodeURIComponent(apiKey)}`;
-      const resp = await discoveryFetch(url, 6500);
-      if (!resp.ok) {
-        return { items: [], nextPageToken: null };
+      const fetchPopular = async () => {
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics,status&chart=mostPopular&regionCode=IN&maxResults=20${tokenParam}&key=${encodeURIComponent(apiKey)}`;
+        const resp = await discoveryFetch(url, 6500);
+        if (!resp.ok) return { items: [] as DiscoveryResult[], nextPageToken: null as string | null };
+        const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
+        const items = (data.items ?? []).filter((i) => i.status?.embeddable !== false);
+        const chMap = await fetchChannelsMap(
+          items.map((i) => i.snippet?.channelId || '').filter(Boolean),
+          apiKey
+        );
+        const converted = items
+          .map((it) => toDiscoveryResult(it, chMap))
+          .filter((v): v is DiscoveryResult => Boolean(v && !v.isShort));
+        for (const v of converted) setCached(`vid:${v.id}`, v);
+        return { items: converted, nextPageToken: data.nextPageToken || null };
+      };
+
+      if (params.trending || (!hasSignals && !pageToken && seed === 0)) {
+        const pop = await fetchPopular();
+        if (pop.items.length > 0) setCached(cacheKey, pop);
+        return pop;
       }
-      const data = (await resp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
-      const items = (data.items ?? []).filter((i) => i.status?.embeddable !== false);
-      const chMap = await fetchChannelsMap(
-        items.map((i) => i.snippet?.channelId || '').filter(Boolean),
-        apiKey
-      );
-      const converted = items
-        .map((it) => toDiscoveryResult(it, chMap))
-        .filter((v): v is DiscoveryResult => Boolean(v && !v.isShort));
-      for (const v of converted) setCached(`vid:${v.id}`, v);
+
+      // Personalized dynamic Home feed: blend fresh topic/search discovery with trending
+      const personalQuery = buildPersonalizedDiscoveryQuery({
+        interestTopics: params.interestTopics,
+        recentSearches: params.recentSearches,
+        preferredLanguage: params.preferredLanguage,
+        shorts: false,
+        seed,
+      });
+      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&regionCode=IN&maxResults=20${tokenParam}&q=${encodeURIComponent(personalQuery)}&key=${encodeURIComponent(apiKey)}`;
+      const [searchResp, popularRes] = await Promise.all([
+        discoveryFetch(searchUrl, 6500),
+        !pageToken ? fetchPopular() : Promise.resolve({ items: [] as DiscoveryResult[], nextPageToken: null }),
+      ]);
+
+      let personalizedItems: DiscoveryResult[] = [];
+      let searchNextToken: string | null = null;
+      if (searchResp.ok) {
+        const data = (await searchResp.json()) as { items?: RawVideoItem[]; nextPageToken?: string };
+        const ids = (data.items ?? [])
+          .map((it) => (typeof it.id === 'string' ? it.id : it.id?.videoId || ''))
+          .filter(Boolean);
+        personalizedItems = (await enrichVideoIds(ids, apiKey)).filter((v) => !v.isShort);
+        searchNextToken = data.nextPageToken || null;
+      }
+
+      const combined: DiscoveryResult[] = [];
+      const seenIds = new Set<string>();
+      const maxLen = Math.max(personalizedItems.length, popularRes.items.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (i < personalizedItems.length && !seenIds.has(personalizedItems[i].id)) {
+          seenIds.add(personalizedItems[i].id);
+          combined.push(personalizedItems[i]);
+        }
+        if (i < popularRes.items.length && !seenIds.has(popularRes.items[i].id)) {
+          seenIds.add(popularRes.items[i].id);
+          combined.push(popularRes.items[i]);
+        }
+      }
+
       const payload: PagedDiscoveryResult = {
-        items: converted,
-        nextPageToken: data.nextPageToken || null,
+        items: combined,
+        nextPageToken: searchNextToken || popularRes.nextPageToken,
       };
       if (payload.items.length > 0) setCached(cacheKey, payload);
       return payload;

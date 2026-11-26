@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Copy, FileVideo, ImagePlus, Mic, Plus, ShieldAlert, Sparkles, Upload, X } from 'lucide-react';
+import { Check, Copy, FileVideo, ImagePlus, Mic, Plus, Share2, ShieldAlert, Sparkles, Upload, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { PlaylistItem, UserProfile, VideoItem } from '../types';
 import { apiFetch, uploadWithProgress } from '../lib/api';
 import { ALL_CATEGORIES, INDIAN_LANGUAGES } from '../lib/format';
@@ -693,21 +694,77 @@ export const ShareModal: React.FC<{
   const shareUrl = `${window.location.origin}/?watch=${encodeURIComponent(video.id)}`;
 
   const copyLink = async () => {
+    let success = false;
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        success = true;
+      }
     } catch {
-      // ignore clipboard errors
+      success = false;
+    }
+
+    if (!success) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = shareUrl;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        success = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch {
+        success = false;
+      }
+    }
+
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#0b0f19] border border-[#e5e7eb] dark:border-[#2f3336] p-5 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-base">Share video</h3>
-          <button type="button" onClick={onClose} aria-label="Close share dialog" className="p-1 rounded-full hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer">
+          <div className="flex items-center gap-2.5">
+            <motion.span
+              animate={copied ? { scale: [1, 1.2, 1], rotate: [0, -8, 0] } : { scale: 1, rotate: 0 }}
+              transition={{ duration: 0.35 }}
+              className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                copied ? 'jio-gradient text-white' : 'bg-[#eff3f4] dark:bg-[#16181c] text-[#0f1419] dark:text-white'
+              }`}
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                {copied ? (
+                  <motion.span
+                    key="hdr-check"
+                    initial={{ scale: 0.4, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.4, opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    <Check className="w-4 h-4" />
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="hdr-share"
+                    initial={{ scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.6, opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <Share2 className="w-4 h-4" />
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </motion.span>
+            <h3 className="font-bold text-base">Share video</h3>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close share dialog" className="p-1.5 rounded-full hover:bg-[#eff3f4] dark:hover:bg-[#1c2333] cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -716,17 +773,51 @@ export const ShareModal: React.FC<{
           <input
             type="text"
             readOnly
+            aria-label="Share URL"
             value={shareUrl}
             className="flex-1 bg-transparent text-xs font-mono-nums focus:outline-none px-1"
           />
-          <button
+          <motion.button
             type="button"
             onClick={copyLink}
-            className="h-8 px-3.5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            whileTap={{ scale: 0.92 }}
+            animate={copied ? { scale: [1, 1.12, 1] } : { scale: 1 }}
+            transition={{ duration: 0.28 }}
+            aria-label={copied ? 'Copied link' : 'Copy share link'}
+            className={`h-8 px-3.5 rounded-full text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors ${
+              copied
+                ? 'jio-gradient text-white shadow-md shadow-blue-600/25'
+                : 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+            }`}
           >
-            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            {copied ? 'Copied' : 'Copy'}
-          </button>
+            <AnimatePresence mode="wait" initial={false}>
+              {copied ? (
+                <motion.span
+                  key="btn-copied"
+                  initial={{ scale: 0.4, rotate: -30, opacity: 0 }}
+                  animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                  exit={{ scale: 0.4, opacity: 0 }}
+                  transition={{ type: 'spring', stiffness: 450, damping: 24 }}
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Copied</span>
+                </motion.span>
+              ) : (
+                <motion.span
+                  key="btn-copy"
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.85, opacity: 0 }}
+                  transition={{ duration: 0.14 }}
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy</span>
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.button>
         </div>
       </div>
     </div>

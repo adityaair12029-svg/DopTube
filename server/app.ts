@@ -24,7 +24,7 @@ import {
   setSessionCookie,
   type AuthedRequest,
 } from './auth.ts';
-import { db, getChannelAvatarSvg, getVideoThumbnailSvg, seedDatabaseIfEmpty } from './db.ts';
+import { db, ensureDbReady, getChannelAvatarSvg, getVideoThumbnailSvg, seedDatabaseIfEmpty } from './db.ts';
 import {
   fetchExternalChannelById,
   fetchExternalDiscoveryPaged,
@@ -61,15 +61,33 @@ import {
   UPLOAD_DIR,
 } from './media.ts';
 import { registerMusicRoutes } from './musicRoutes.ts';
+import { computeViewsLast30Days } from './recommendation.ts';
 import { validateContentCandidate } from './validation.ts';
 
-ensureMediaDirs();
-seedDatabaseIfEmpty();
+let readyPromise: Promise<void> | null = null;
+export function ensureServerReady(): Promise<void> {
+  if (!readyPromise) {
+    readyPromise = (async () => {
+      ensureMediaDirs();
+      await ensureDbReady();
+      seedDatabaseIfEmpty();
+    })();
+  }
+  return readyPromise;
+}
 
 export const app = express();
 app.set('trust proxy', 1);
 
 app.use(securityHeaders);
+app.use(async (_req, _res, next) => {
+  try {
+    await ensureServerReady();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 app.use(express.json({ limit: '4mb' }));
 app.use((req, _res, next) => {
   const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
@@ -1748,6 +1766,30 @@ app.get('/api/studio/overview', requireAuth, (req: AuthedRequest, res) => {
   const totalLikes = videos.reduce((acc, v) => acc + v.likes, 0);
   const estWatchHours = Math.round(videos.reduce((acc, v) => acc + (v.views * Math.max(30, v.durationSec * 0.45)) / 3600, 0));
 
+  const eventDates = db.prepare(`
+    SELECT ue.created_at as createdAt
+    FROM user_events ue
+    JOIN videos v ON v.id = ue.video_id
+    WHERE v.channel_id = ? AND ue.event_type IN ('start', 'click', 'completion')
+    ORDER BY ue.created_at DESC
+    LIMIT 1000
+  `).all(channel.id) as Array<{ createdAt: string }>;
+
+  const historyDates = db.prepare(`
+    SELECT wh.watched_at as watchedAt
+    FROM watch_history wh
+    JOIN videos v ON v.id = wh.video_id
+    WHERE v.channel_id = ?
+    ORDER BY wh.watched_at DESC
+    LIMIT 1000
+  `).all(channel.id) as Array<{ watchedAt: string }>;
+
+  const viewsLast30Days = computeViewsLast30Days({
+    events: eventDates,
+    history: historyDates,
+    videos: videos.map((v) => ({ createdAt: v.createdAt, views: v.views })),
+  });
+
   res.json({
     channel,
     stats: {
@@ -1757,6 +1799,7 @@ app.get('/api/studio/overview', requireAuth, (req: AuthedRequest, res) => {
       videoCount: videos.length,
       estWatchHours,
     },
+    viewsLast30Days,
     videos,
     jobs,
     comments,
@@ -1770,12 +1813,12 @@ app.get('/api/admin/overview', requireAdmin, (_req, res) => {
     SELECT r.*, u.name as reporterName
     FROM reports r LEFT JOIN users u ON u.id = r.reporter_user_id
     ORDER BY r.created_at DESC
-  `).all();
+  `).all() as Array<Record<string, unknown>>;
   const copyrightClaims = db.prepare(`
     SELECT cc.*, v.title as videoTitle
     FROM copyright_claims cc LEFT JOIN videos v ON v.id = cc.video_id
     ORDER BY cc.created_at DESC
-  `).all();
+  `).all() as Array<Record<string, unknown>>;
   const jobs = db.prepare(`
     SELECT j.*, v.title as videoTitle
     FROM processing_jobs j LEFT JOIN videos v ON v.id = j.video_id
@@ -1787,8 +1830,8 @@ app.get('/api/admin/overview', requireAdmin, (_req, res) => {
     metrics: {
       totalUsers: users.length,
       totalVideos,
-      openReports: reports.filter((r: Record<string, unknown>) => r.status === 'open').length,
-      pendingClaims: copyrightClaims.filter((c: Record<string, unknown>) => c.status === 'pending').length,
+      openReports: reports.filter((r) => r.status === 'open').length,
+      pendingClaims: copyrightClaims.filter((c) => c.status === 'pending').length,
     },
     users,
     reports,
@@ -1839,3 +1882,17 @@ app.patch('/api/admin/users/:id/role', requireAdmin, (req: AuthedRequest, res) =
 
 registerAiAndLibraryRoutes(app, ensureExternalVideoRecord);
 registerMusicRoutes(app);
+
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  if (req.path.startsWith('/api')) {
+    const msg = err instanceof Error ? err.message : 'Unexpected server error';
+    console.error('API Error:', msg);
+    res.status(500).json({ error: msg });
+    return;
+  }
+  next(err);
+});

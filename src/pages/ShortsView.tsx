@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   Ban,
   EyeOff,
   ListPlus,
   Loader2,
+  Maximize,
   MessageCircle,
+  Minimize,
   Pause,
   Play,
   Share2,
@@ -29,6 +32,7 @@ interface ShortsViewProps {
   discoveryStatus?: DiscoveryStatus | null;
   onLoadMore?: () => void;
   onSubscriptionsChanged?: () => void;
+  onBack?: () => void;
   onOpenAuth: () => void;
   onOpenChannel: (channelId: string) => void;
   onSavePlaylist: (videoId: string) => void;
@@ -45,6 +49,7 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
   discoveryStatus,
   onLoadMore,
   onSubscriptionsChanged,
+  onBack,
   onOpenAuth,
   onOpenChannel,
   onSavePlaylist,
@@ -54,6 +59,7 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
@@ -62,10 +68,31 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
   const [comments, setComments] = useState<VideoComment[]>([]);
   const [commentText, setCommentText] = useState('');
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
   const activeVideoRef = useRef<HTMLVideoElement | null>(null);
   const didScrollInitialRef = useRef(false);
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const target = rootRef.current;
+    if (!target) return;
+    try {
+      if (!document.fullscreenElement) {
+        await target.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      onToast('Fullscreen unavailable in this browser frame');
+    }
+  };
 
   // Strict deduplication + exclude hidden Shorts
   const visibleShorts = useMemo(() => {
@@ -299,11 +326,15 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
   };
 
   return (
-    <div className="h-[calc(100dvh-7.25rem)] md:h-[calc(100vh-56px)] bg-white dark:bg-black flex items-center justify-center gap-4 px-2 sm:px-4">
+    <div
+      ref={rootRef}
+      data-testid="shorts-fullscreen-shell"
+      className="fixed inset-0 z-40 md:static md:inset-auto h-[100dvh] md:h-[calc(100vh-56px)] bg-black md:bg-transparent flex items-center justify-center gap-4 p-0 md:px-4 md:py-3"
+    >
       {/* Real Vertical Scroll-Snap Shorts Container */}
       <div
         ref={feedRef}
-        className="h-full w-full max-w-[430px] overflow-y-auto snap-y snap-mandatory no-scrollbar rounded-2xl bg-black border border-[#e5e7eb] dark:border-[#2f3336]"
+        className="relative h-full w-full md:max-w-[460px] overflow-y-auto snap-y snap-mandatory no-scrollbar rounded-none md:rounded-2xl bg-black border-0 md:border md:border-[#e5e7eb] md:dark:border-[#2f3336] shadow-2xl"
       >
         {visibleShorts.map((item, idx) => {
           const isCurrent = idx === safeIndex;
@@ -321,6 +352,56 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
               }}
               className="relative h-full w-full snap-start snap-always flex items-center justify-center overflow-hidden bg-black"
             >
+              {/* Always-available Top Back + Fullscreen Chrome */}
+              <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  {onBack && (
+                    <button
+                      type="button"
+                      onClick={onBack}
+                      aria-label="Back from Shorts"
+                      className="w-9 h-9 rounded-full bg-black/65 hover:bg-black/80 text-white border border-white/15 flex items-center justify-center cursor-pointer backdrop-blur-xs"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                    </button>
+                  )}
+                  <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-bold tracking-wide border border-white/15 backdrop-blur-xs">
+                    Shorts
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 pointer-events-auto">
+                  {!(item.sourceType === 'external' && item.externalEmbedUrl) && !isFailed && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        aria-label={playing ? 'Pause Short' : 'Play Short'}
+                        className="w-9 h-9 rounded-full bg-black/65 text-white border border-white/15 flex items-center justify-center cursor-pointer"
+                      >
+                        {playing ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMuted((m) => !m)}
+                        aria-label={muted ? 'Unmute Short' : 'Mute Short'}
+                        className="w-9 h-9 rounded-full bg-black/65 text-white border border-white/15 flex items-center justify-center cursor-pointer"
+                      >
+                        {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={toggleFullscreen}
+                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen Short'}
+                    className="w-9 h-9 rounded-full bg-black/65 hover:bg-black/80 text-white border border-white/15 flex items-center justify-center cursor-pointer backdrop-blur-xs"
+                  >
+                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
               {isFailed ? (
                 <div className="relative w-full h-full flex flex-col items-center justify-center bg-black text-white p-6 text-center">
                   <img
@@ -375,42 +456,21 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
                   allowFullScreen
                 />
               ) : (
-                <>
-                  <video
-                    key={item.id}
-                    ref={(el) => {
-                      if (isCurrent) activeVideoRef.current = el;
-                    }}
-                    src={item.videoUrl}
-                    poster={item.thumbnailUrl}
-                    autoPlay={isCurrent}
-                    loop
-                    muted={muted || !isCurrent}
-                    playsInline
-                    onClick={togglePlay}
-                    onError={() => setFailedIds((prev) => new Set(prev).add(item.id))}
-                    className="w-full h-full object-cover cursor-pointer"
-                  />
-
-                  <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={togglePlay}
-                      aria-label={playing ? 'Pause Short' : 'Play Short'}
-                      className="w-9 h-9 rounded-full bg-black/60 text-white border border-white/15 flex items-center justify-center cursor-pointer"
-                    >
-                      {playing ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMuted((m) => !m)}
-                      aria-label={muted ? 'Unmute Short' : 'Mute Short'}
-                      className="w-9 h-9 rounded-full bg-black/60 text-white border border-white/15 flex items-center justify-center cursor-pointer"
-                    >
-                      {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </>
+                <video
+                  key={item.id}
+                  ref={(el) => {
+                    if (isCurrent) activeVideoRef.current = el;
+                  }}
+                  src={item.videoUrl}
+                  poster={item.thumbnailUrl}
+                  autoPlay={isCurrent}
+                  loop
+                  muted={muted || !isCurrent}
+                  playsInline
+                  onClick={togglePlay}
+                  onError={() => setFailedIds((prev) => new Set(prev).add(item.id))}
+                  className="w-full h-full object-cover cursor-pointer"
+                />
               )}
 
               {/* Bottom Creator & Caption Scrim */}
@@ -556,7 +616,7 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
 
       {/* Comments Side Panel / Mobile Drawer */}
       {commentsOpen && (
-        <div className="fixed md:static inset-x-0 bottom-14 md:inset-auto z-30 flex flex-col w-full md:w-80 h-[55vh] md:h-full md:max-h-[780px] rounded-t-2xl md:rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] p-4 shadow-2xl">
+        <div className="fixed md:static inset-x-0 bottom-0 md:inset-auto z-50 md:z-30 flex flex-col w-full md:w-80 h-[55vh] md:h-full md:max-h-[780px] rounded-t-2xl md:rounded-2xl bg-white dark:bg-[#0b0f19] border border-[#e5e7eb] dark:border-[#2f3336] p-4 shadow-2xl">
           <div className="flex items-center justify-between pb-3 border-b border-[#e5e7eb] dark:border-[#2f3336]">
             <h3 className="font-bold text-sm">Comments</h3>
             <button

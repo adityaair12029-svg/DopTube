@@ -9,7 +9,11 @@
     --dt-border: #e5e7eb;
     --dt-text: #0f1419;
     --dt-text-muted: #536471;
-    --dt-accent: #0f1419;
+    --dt-accent: #1d4ed8;
+    --dt-jio-blue: #1d4ed8;
+    --dt-jio-violet: #7c3aed;
+    --dt-jio-pink: #ec4899;
+    --dt-jio-navy: #090d1e;
   }
 
   .dark {
@@ -18,8 +22,12 @@
     --dt-surface-hover: #202327;
     --dt-border: #2f3336;
     --dt-text: #e7e9ea;
-    --dt-text-muted: #71767b;
-    --dt-accent: #ffffff;
+    --dt-text-muted: #8b98a5;
+    --dt-accent: #38bdf8;
+    --dt-jio-blue: #2563eb;
+    --dt-jio-violet: #8b5cf6;
+    --dt-jio-pink: #ec4899;
+    --dt-jio-navy: #080d24;
   }
 
   html {
@@ -37,7 +45,32 @@
   }
 }
 
-/* Custom subtle scrollbars matching modern video platforms */
+/* Hybrid 50% X + 50% JioHotstar utilities */
+.jio-gradient {
+  background: linear-gradient(95deg, #1d4ed8 0%, #7c3aed 52%, #ec4899 100%);
+}
+
+.jio-gradient-text {
+  background: linear-gradient(95deg, #38bdf8 0%, #818cf8 45%, #ec4899 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.dark .hybrid-canvas-bg {
+  background-color: #000000;
+  background-image:
+    radial-gradient(ellipse 75% 38% at 50% 0%, rgba(29, 78, 216, 0.16), rgba(124, 58, 237, 0.06) 55%, transparent 100%),
+    radial-gradient(ellipse 45% 28% at 92% 14%, rgba(236, 72, 153, 0.08), transparent 70%);
+}
+
+.hybrid-canvas-bg {
+  background-color: #ffffff;
+  background-image:
+    radial-gradient(ellipse 80% 35% at 50% 0%, rgba(37, 99, 235, 0.05), rgba(236, 72, 153, 0.025) 60%, transparent 100%);
+}
+
+/* Custom subtle scrollbars */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

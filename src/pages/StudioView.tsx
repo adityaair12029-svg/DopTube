@@ -1,8 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { BarChart3, Edit3, Eye, MessageSquare, Trash2, Upload, Users, Video as VideoIcon } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { BarChart3, Edit3, Eye, MessageSquare, Trash2, TrendingUp, Upload, Users, Video as VideoIcon } from 'lucide-react';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { ChannelSummary, UserProfile, VideoItem } from '../types';
 import { apiFetch } from '../lib/api';
 import { ALL_CATEGORIES, formatRelativeTime, formatViews, INDIAN_LANGUAGES } from '../lib/format';
+
+interface StudioViewPoint {
+  date: string;
+  label: string;
+  views: number;
+}
 
 interface StudioOverview {
   channel: ChannelSummary;
@@ -13,6 +20,7 @@ interface StudioOverview {
     videoCount: number;
     estWatchHours: number;
   };
+  viewsLast30Days?: StudioViewPoint[];
   videos: VideoItem[];
   jobs: Array<{ id: string; videoTitle: string; stage: string; progress: number; status: string; updated_at: string }>;
   comments: Array<{ id: string; body: string; createdAt: string; authorName: string; videoTitle: string; videoId: string }>;
@@ -46,6 +54,24 @@ export const StudioView: React.FC<{
     load();
   }, [user?.id]);
 
+  const chartData = useMemo<StudioViewPoint[]>(() => {
+    if (data?.viewsLast30Days && data.viewsLast30Days.length > 0) {
+      return data.viewsLast30Days;
+    }
+    const fallback: StudioViewPoint[] = [];
+    const now = Date.now();
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    for (let offset = 29; offset >= 0; offset--) {
+      const d = new Date(now - offset * 86_400_000);
+      fallback.push({
+        date: d.toISOString().slice(0, 10),
+        label: `${months[d.getUTCMonth()]} ${d.getUTCDate()}`,
+        views: 0,
+      });
+    }
+    return fallback;
+  }, [data?.viewsLast30Days]);
+
   if (!user) {
     return (
       <div className="py-20 text-center max-w-md mx-auto px-4">
@@ -56,7 +82,7 @@ export const StudioView: React.FC<{
         <button
           type="button"
           onClick={onOpenAuth}
-          className="mt-5 h-10 px-6 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold cursor-pointer"
+          className="mt-5 h-10 px-6 rounded-full jio-gradient text-white text-sm font-bold cursor-pointer shadow-md shadow-blue-600/20"
         >
           Sign in
         </button>
@@ -122,7 +148,7 @@ export const StudioView: React.FC<{
         <button
           type="button"
           onClick={onOpenUpload}
-          className="h-10 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-bold flex items-center gap-2 cursor-pointer"
+          className="h-10 px-5 rounded-full jio-gradient text-white text-sm font-bold flex items-center gap-2 cursor-pointer shadow-md shadow-blue-600/20"
         >
           <Upload className="w-4 h-4" />
           Upload video
@@ -141,11 +167,11 @@ export const StudioView: React.FC<{
           return (
             <div
               key={kpi.label}
-              className="p-4 rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336]"
+              className="p-4 rounded-2xl bg-white dark:bg-[#0b0f19] border border-[#e5e7eb] dark:border-[#1f2937]"
             >
               <div className="flex items-center justify-between text-xs text-[#536471] dark:text-[#71767b] mb-2">
                 <span>{kpi.label}</span>
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 text-[#2563eb] dark:text-[#60a5fa]" />
               </div>
               <p className="text-2xl font-bold font-mono-nums">{kpi.value}</p>
             </div>
@@ -153,9 +179,78 @@ export const StudioView: React.FC<{
         })}
       </div>
 
+      {/* 30-Day Views Line Chart (Recharts) */}
+      <section
+        data-testid="studio-views-chart"
+        className="p-5 rounded-2xl bg-white dark:bg-[#0b0f19] border border-[#e5e7eb] dark:border-[#1f2937]"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div>
+            <h2 className="font-bold text-base flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-[#2563eb] dark:text-[#60a5fa]" />
+              <span>Video Views — Last 30 Days</span>
+            </h2>
+            <p className="text-xs text-[#536471] dark:text-[#71767b] mt-0.5">
+              Daily audience views across your DopTube channel over the past 30 days
+            </p>
+          </div>
+          <span className="text-xs font-mono-nums font-semibold px-2.5 py-1 rounded-full bg-[#eff3f4] dark:bg-[#16181c] text-[#0f1419] dark:text-[#e7e9ea]">
+            Total: {formatViews(data.stats.totalViews)}
+          </span>
+        </div>
+
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 4 }}>
+              <defs>
+                <linearGradient id="studioViewsGradient" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#2563eb" />
+                  <stop offset="50%" stopColor="#7c3aed" />
+                  <stop offset="100%" stopColor="#ec4899" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(113,118,123,0.22)" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: '#71767b' }}
+                tickLine={false}
+                axisLine={false}
+                minTickGap={22}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#71767b' }}
+                tickLine={false}
+                axisLine={false}
+                allowDecimals={false}
+                width={38}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#0b0f19',
+                  borderColor: '#2f3336',
+                  borderRadius: '12px',
+                  fontSize: '12px',
+                  color: '#e7e9ea',
+                }}
+                labelStyle={{ color: '#9ca3af', fontWeight: 600 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="views"
+                name="Views"
+                stroke="url(#studioViewsGradient)"
+                strokeWidth={3}
+                dot={false}
+                activeDot={{ r: 5, fill: '#ec4899', stroke: '#ffffff', strokeWidth: 2 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
       {/* Videos Table */}
-      <section className="rounded-2xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] overflow-hidden">
-        <div className="px-4 py-3 bg-[#eff3f4]/50 dark:bg-black/40 border-b border-[#e5e7eb] dark:border-[#2f3336] font-bold text-sm">
+      <section className="rounded-2xl bg-white dark:bg-[#0b0f19] border border-[#e5e7eb] dark:border-[#1f2937] overflow-hidden">
+        <div className="px-4 py-3 bg-[#eff3f4]/50 dark:bg-black/40 border-b border-[#e5e7eb] dark:border-[#1f2937] font-bold text-sm">
           Channel Content
         </div>
         {data.videos.length === 0 ? (

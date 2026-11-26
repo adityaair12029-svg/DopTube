@@ -18,6 +18,9 @@ import {
   buildUsernameSuggestions,
   type RankableVideo,
 } from './domain';
+import { computeViewsLast30Days, scoreCandidate, type CandidateVideo, type UserAiContext } from './recommendation';
+import { buildPersonalizedDiscoveryQuery } from './discovery';
+import { createSqlJsCompatDatabase } from './db';
 
 test('password hashing and verification round-trip', () => {
   const hash = hashPassword('doptube-secret-99');
@@ -222,4 +225,157 @@ test('buildUsernameSuggestions generates unique @-prefixed X-style handles', () 
   assert.ok(handles.every((h) => /^@[a-z0-9_]+$/.test(h)));
   assert.equal(new Set(handles).size, handles.length);
 });
+
+test('computeViewsLast30Days returns 30 ordered points combining events, watch history, and video views', () => {
+  const nowMs = new Date('2026-11-25T12:00:00Z').getTime();
+  const points = computeViewsLast30Days({
+    events: [
+      { createdAt: '2026-11-25T08:00:00Z' },
+      { createdAt: '2026-11-24T10:00:00Z' },
+      { createdAt: '2026-11-24T11:00:00Z' },
+    ],
+    history: [{ watchedAt: '2026-11-25T09:00:00Z' }],
+    videos: [{ createdAt: '2026-11-20T05:00:00Z', views: 14 }],
+    nowMs,
+  });
+
+  assert.equal(points.length, 30);
+  assert.equal(points[29].date, '2026-11-25');
+  assert.equal(points[29].views, 2);
+  assert.equal(points[28].date, '2026-11-24');
+  assert.equal(points[28].views, 2);
+  const nov20 = points.find((p) => p.date === '2026-11-20');
+  assert.equal(nov20?.views, 10);
+});
+
+test('buildPersonalizedDiscoveryQuery adapts queries using user interests, searches, and language', () => {
+  const homeQ = buildPersonalizedDiscoveryQuery({
+    interestTopics: ['Physics', 'Space'],
+    recentSearches: ['quantum mechanics'],
+    preferredLanguage: 'Hindi',
+    shorts: false,
+    seed: 0,
+  });
+  assert.ok(homeQ.toLowerCase().includes('quantum mechanics'));
+  assert.ok(homeQ.toLowerCase().includes('hindi'));
+
+  const shortsQ = buildPersonalizedDiscoveryQuery({
+    interestTopics: ['Cricket'],
+    preferredLanguage: 'Tamil',
+    shorts: true,
+    seed: 1,
+  });
+  assert.ok(shortsQ.toLowerCase().includes('shorts'));
+  assert.ok(shortsQ.toLowerCase().includes('cricket'));
+  assert.ok(shortsQ.toLowerCase().includes('tamil'));
+});
+
+test('scoreCandidate demotes unrelated low-view native uploads from other creators', () => {
+  const nowMs = new Date('2026-11-25T12:00:00Z').getTime();
+  const ctx: UserAiContext = {
+    userId: 'viewer_1',
+    preferredLanguages: ['Hindi'],
+    preferredCategories: ['Technology'],
+    selectedInterests: ['Technology', 'AI'],
+    subscribedChannelIds: new Set(),
+    interestScores: { Technology: 90, AI: 75 },
+    watchedVideoIds: new Set(),
+    completedVideoIds: new Set(),
+    skippedVideoIds: new Set(),
+    likedVideoIds: new Set(),
+    dislikedVideoIds: new Set(),
+    creatorWatchCounts: {},
+    recentSearches: ['typescript'],
+    personalizationEnabled: true,
+    validation: {
+      viewerUserId: 'viewer_1',
+      restrictedMode: false,
+      blockedCreators: new Set(),
+      blockedTopics: new Set(),
+      notInterestedVideoIds: new Set(),
+      moderatedVideoIds: new Set(),
+      region: 'IN',
+    },
+  };
+
+  const unrelatedLowViewNative: CandidateVideo = {
+    id: 'nat_1',
+    title: 'My random room tour',
+    description: 'Testing upload',
+    tags: ['random'],
+    category: 'Lifestyle',
+    language: 'English',
+    channelId: 'ch_other',
+    channelName: 'Other Creator',
+    channelHandle: '@othercreator',
+    channelAvatar: '/api/avatars/ch_other.svg',
+    subscriberCount: 12,
+    ownerUserId: 'creator_other',
+    views: 5,
+    likes: 0,
+    dislikes: 0,
+    createdAt: '2026-11-25T11:30:00Z',
+    isShort: false,
+    isLive: false,
+    visibility: 'public',
+    status: 'published',
+    durationSec: 120,
+    channelVerified: false,
+    sourceType: 'native',
+    videoUrl: '/api/media/nat_1.mp4',
+    hlsUrl: null,
+    thumbnailUrl: '/api/thumbnails/card/nat_1.svg',
+  };
+
+  const matchedTechVideo: CandidateVideo = {
+    id: 'ext_1',
+    title: 'TypeScript & AI Architecture Deep Dive in Hindi',
+    description: 'Complete practical tutorial on TypeScript and AI agents',
+    tags: ['typescript', 'ai', 'technology'],
+    category: 'Technology',
+    language: 'Hindi',
+    channelId: 'ch_tech',
+    channelName: 'Tech India',
+    channelHandle: '@techindia',
+    channelAvatar: '/api/avatars/ch_tech.svg',
+    subscriberCount: 150000,
+    views: 45000,
+    likes: 3200,
+    dislikes: 12,
+    createdAt: '2026-11-24T12:00:00Z',
+    isShort: false,
+    isLive: false,
+    visibility: 'public',
+    status: 'published',
+    durationSec: 950,
+    channelVerified: true,
+    sourceType: 'external',
+    videoUrl: '',
+    hlsUrl: null,
+    externalEmbedUrl: 'https://www.youtube-nocookie.com/embed/ext_1',
+    thumbnailUrl: '/api/thumbnails/card/ext_1.svg',
+  };
+
+  const lowScore = scoreCandidate(unrelatedLowViewNative, ctx, undefined, nowMs);
+  const techScore = scoreCandidate(matchedTechVideo, ctx, undefined, nowMs);
+  assert.ok(techScore > lowScore + 25, `Expected matched tech score (${techScore}) to beat unrelated low-view native (${lowScore})`);
+});
+
+test('createSqlJsCompatDatabase initializes schema in pure JS and runs queries without native sqlite', async () => {
+  const compatDb = await createSqlJsCompatDatabase();
+  compatDb
+    .prepare(
+      `INSERT INTO users (id, name, email, password_hash, role, preferred_language, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run('u_sqljs_1', 'SqlJs Tester', 'sqljs@example.com', 'hash', 'creator', 'Hindi', '2026-11-25T10:00:00Z');
+
+  const row = compatDb.prepare('SELECT id, name, preferred_language FROM users WHERE id = ?').get('u_sqljs_1') as
+    | { id: string; name: string; preferred_language: string }
+    | undefined;
+  assert.equal(row?.id, 'u_sqljs_1');
+  assert.equal(row?.name, 'SqlJs Tester');
+  assert.equal(row?.preferred_language, 'Hindi');
+});
+
 

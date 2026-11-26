@@ -23,6 +23,7 @@ import {
   type BehaviorEventType,
   type CandidateVideo,
 } from './recommendation.ts';
+import { GoogleGenAI } from '@google/genai';
 import { validateContentCandidate } from './validation.ts';
 
 export function registerAiAndLibraryRoutes(
@@ -105,11 +106,21 @@ export function registerAiAndLibraryRoutes(
           )
         : [];
 
+    const topTopics = Object.entries(ctx.interestScores)
+      .sort((a, b) => b[1] - a[1])
+      .map(([topic]) => topic)
+      .slice(0, 5);
+    const seed = Number(req.query.seed || 0) || Math.floor(Date.now() / (10 * 60 * 1000)) % 12;
+
     const extPaged = await fetchExternalFeedPaged({
       category,
       language,
       shorts: shorts === '1',
       pageToken: cleanToken,
+      interestTopics: topTopics,
+      recentSearches: ctx.recentSearches,
+      preferredLanguage: ctx.preferredLanguages[0],
+      refreshSeed: seed,
     });
 
     const pool: CandidateVideo[] = [...native, ...extPaged.items.map(toCandidate)];
@@ -221,7 +232,20 @@ export function registerAiAndLibraryRoutes(
             { language }
           )
         : [];
-    const extPaged = await fetchExternalFeedPaged({ shorts: true, language, pageToken });
+    const topTopics = Object.entries(ctx.interestScores)
+      .sort((a, b) => b[1] - a[1])
+      .map(([topic]) => topic)
+      .slice(0, 5);
+    const seed = Number(req.query.seed || 0) || Math.floor(Date.now() / (5 * 60 * 1000)) % 12;
+    const extPaged = await fetchExternalFeedPaged({
+      shorts: true,
+      language,
+      pageToken,
+      interestTopics: topTopics,
+      recentSearches: ctx.recentSearches,
+      preferredLanguage: ctx.preferredLanguages[0],
+      refreshSeed: seed,
+    });
     const ranked = rankShortsFeed([...native, ...extPaged.items.map(toCandidate)], ctx);
     res.json({
       videos: ranked,
@@ -867,5 +891,118 @@ export function registerAiAndLibraryRoutes(
       anomalyFlags,
       topTopics,
     });
+  });
+
+  // =========================================================================
+  // MULTI-TURN GEMINI AI ASSISTANT CHATBOT (FREE-TIER MODELS ONLY)
+  // =========================================================================
+
+  app.post('/api/ai/chat', rateLimit(30, 60_000), async (req: AuthedRequest, res) => {
+    const { message, history = [], role = 'general' } = req.body as {
+      message?: string;
+      history?: Array<{ role?: string; text?: string }>;
+      role?: 'general' | 'fast' | 'creator' | 'discovery';
+    };
+
+    const cleanMessage = typeof message === 'string' ? message.trim() : '';
+    if (!cleanMessage) {
+      res.status(400).json({ error: 'Please enter a message.' });
+      return;
+    }
+    if (cleanMessage.length > 2000) {
+      res.status(400).json({ error: 'Message exceeds 2,000 characters.' });
+      return;
+    }
+
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+      res.status(503).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
+      return;
+    }
+
+    const roleInstructions: Record<string, string> = {
+      general:
+        'You are DopTube Assistant, a concise and helpful guide for India’s DopTube video platform. Answer clearly in English or Hinglish/Hindi matching the user.',
+      fast:
+        'You are DopTube Quick Q&A. Give direct, crisp 1-3 sentence answers for quick questions about videos, features, or general topics.',
+      creator:
+        'You are DopTube Creator Strategist. Help creators improve video hooks, titles, thumbnails, Shorts retention, and growth across Indian languages.',
+      discovery:
+        'You are DopTube Discovery Guide. Recommend specific search keywords, Indian creator niches, playlists, and learning tracks tailored to user interests.',
+    };
+
+    const selectedRole = role in roleInstructions ? role : 'general';
+    const model = selectedRole === 'fast' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen';
+
+    const ctx = buildUserAiContext(req.auth?.userId);
+    const userTopics = Object.entries(ctx.interestScores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([t]) => t);
+    const contextSuffix =
+      userTopics.length > 0
+        ? ` The current viewer follows topics: ${userTopics.join(', ')} (languages: ${ctx.preferredLanguages.join(', ')}).`
+        : '';
+
+    const normalizedHistory = Array.isArray(history)
+      ? history
+          .slice(-20)
+          .filter((turn) => typeof turn?.text === 'string' && turn.text.trim().length > 0)
+          .map((turn) => ({
+            role: turn.role === 'model' ? ('model' as const) : ('user' as const),
+            parts: [{ text: turn.text!.trim().slice(0, 2000) }],
+          }))
+      : [];
+
+    const runChat = async (targetModel: string) => {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
+      const chat = ai.chats.create({
+        model: targetModel,
+        history: normalizedHistory,
+        config: {
+          systemInstruction: `${roleInstructions[selectedRole]}${contextSuffix}`,
+          temperature: 0.7,
+        },
+      });
+      return chat.sendMessage({ message: cleanMessage });
+    };
+
+    try {
+      let activeModel = model;
+      let result;
+      try {
+        result = await runChat(activeModel);
+      } catch (primaryErr) {
+        const primaryMsg = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+        const isTransient = /503|UNAVAILABLE|high demand|overloaded/i.test(primaryMsg);
+        if (activeModel !== 'gemini-3.1-flash-lite' && isTransient) {
+          activeModel = 'gemini-3.1-flash-lite';
+          result = await runChat(activeModel);
+        } else {
+          throw primaryErr;
+        }
+      }
+
+      const reply = (result.text || '').trim();
+      if (!reply) {
+        res.status(502).json({ error: 'Assistant returned an empty response.' });
+        return;
+      }
+      res.json({ reply, model: activeModel, role: selectedRole });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : 'Unable to reach Gemini service.';
+      let friendly = raw;
+      try {
+        const parsed = JSON.parse(raw) as { error?: { message?: string } };
+        if (parsed?.error?.message) friendly = parsed.error.message;
+      } catch {
+        // keep raw message
+      }
+      console.error('Gemini chat error:', friendly);
+      res.status(502).json({ error: friendly });
+    }
   });
 }

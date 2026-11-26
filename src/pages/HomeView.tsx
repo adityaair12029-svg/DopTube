@@ -123,11 +123,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   return (
     <div className="sm:px-6 pb-24 md:pb-12">
-      {/* X/Twitter Style Top Timeline Tabs (For you / Following) */}
+      {/* X/Twitter Style Top Timeline Tabs (For you / Following) with JioHotstar underline */}
       <div
         role="tablist"
         aria-label="Home feed timeline"
-        className="grid grid-cols-2 border-b border-[#e5e7eb] dark:border-[#2f3336] bg-white/95 dark:bg-black/95"
+        className="grid grid-cols-2 border-b border-[#e5e7eb] dark:border-[#1e2638] bg-white/90 dark:bg-[#050814]/90 backdrop-blur-sm"
       >
         {(
           [
@@ -143,19 +143,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
               role="tab"
               aria-selected={active}
               onClick={() => onChangeHomeFeedTab(id)}
-              className="relative h-12 flex items-center justify-center hover:bg-[#eff3f4]/70 dark:hover:bg-[#16181c] transition-colors cursor-pointer"
+              className="relative h-12 flex items-center justify-center hover:bg-[#eff3f4]/70 dark:hover:bg-[#101524] transition-colors cursor-pointer"
             >
               <span
                 className={`text-[15px] ${
                   active
-                    ? 'font-bold text-[#0f1419] dark:text-[#e7e9ea]'
-                    : 'font-medium text-[#536471] dark:text-[#71767b]'
+                    ? 'font-bold text-[#0f1419] dark:text-white'
+                    : 'font-medium text-[#536471] dark:text-[#8b98a5]'
                 }`}
               >
                 {label}
               </span>
               {active && (
-                <span className="absolute bottom-0 w-16 h-[3px] rounded-full bg-[#0f1419] dark:bg-white" />
+                <span className="absolute bottom-0 w-16 h-[3px] rounded-full jio-gradient" />
               )}
             </button>
           );
@@ -322,7 +322,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <section className="my-10 px-3 sm:px-0">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-7 h-7 rounded-lg bg-[#0f1419] dark:bg-white text-white dark:text-black flex items-center justify-center">
+                  <span className="w-7 h-7 rounded-lg jio-gradient text-white flex items-center justify-center shadow-[0_2px_10px_rgba(236,72,153,0.35)]">
                     <Zap className="w-4 h-4 fill-current" />
                   </span>
                   <h2 className="text-[20px] font-bold tracking-tight text-[#0f1419] dark:text-[#e7e9ea]">

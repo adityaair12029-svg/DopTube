@@ -347,7 +347,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="relative h-4 flex items-center group/seek cursor-pointer mb-1">
           <div className="w-full h-1 group-hover/seek:h-1.5 bg-white/25 rounded-full overflow-hidden transition-all relative">
             <div className="absolute inset-y-0 left-0 bg-white/40" style={{ width: `${bufferedPct}%` }} />
-            <div className="absolute inset-y-0 left-0 bg-white" style={{ width: `${progressPct}%` }} />
+            <div className="absolute inset-y-0 left-0 jio-gradient" style={{ width: `${progressPct}%` }} />
           </div>
           <input
             type="range"

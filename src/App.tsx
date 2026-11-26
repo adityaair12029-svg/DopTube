@@ -16,6 +16,7 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { MiniPlayer } from './components/MiniPlayer';
 import { MusicMiniPlayer } from './components/MusicMiniPlayer';
+import { GeminiChatbot } from './components/GeminiChatbot';
 import {
   AuthModal,
   OnboardingModal,
@@ -664,7 +665,7 @@ export default function App() {
   const infiniteScrollEnabled = true;
 
   return (
-    <div className="min-h-screen bg-white dark:bg-black text-[#0f1419] dark:text-[#e7e9ea]">
+    <div className="min-h-screen hybrid-canvas-bg text-[#0f1419] dark:text-[#e7e9ea]">
       <Header
         user={user}
         theme={theme}
@@ -703,7 +704,7 @@ export default function App() {
         onOpenUpload={handleOpenUpload}
       />
 
-      <main className={`pt-14 transition-all duration-150 ${mainMarginClass}`}>
+      <main className={`${page === 'shorts' ? 'pt-0 md:pt-14' : 'pt-14'} transition-all duration-150 ${mainMarginClass}`}>
         {page === 'home' && (
           <HomeView
             videos={videos}
@@ -792,6 +793,7 @@ export default function App() {
             discoveryStatus={discoveryStatus}
             onLoadMore={handleLoadMoreShorts}
             onSubscriptionsChanged={loadUserContext}
+            onBack={() => navigateTo('home')}
             onOpenAuth={() => setAuthOpen(true)}
             onOpenChannel={(id) => navigateTo('channel', id)}
             onSavePlaylist={handleSavePlaylist}
@@ -1028,6 +1030,9 @@ export default function App() {
         }}
       />
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+      {/* Multi-Turn DopTube AI Chatbot */}
+      <GeminiChatbot user={user} hideOnMobile={page === 'shorts'} />
 
       {/* Toast Notification */}
       {toast && (
