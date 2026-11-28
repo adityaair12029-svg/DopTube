@@ -355,8 +355,44 @@ const SCHEMA_SQL = `
   );
 `;
 
+const TABLE_COPY_ORDER = [
+  'users',
+  'channels',
+  'categories',
+  'languages',
+  'videos',
+  'video_variants',
+  'processing_jobs',
+  'comments',
+  'comment_replies',
+  'video_reactions',
+  'subscriptions',
+  'playlists',
+  'playlist_videos',
+  'watch_later',
+  'watch_history',
+  'search_history',
+  'notifications',
+  'reports',
+  'copyright_claims',
+  'audit_logs',
+  'user_events',
+  'user_interests',
+  'user_preferences',
+  'user_feedback',
+  'blocked_topics',
+  'blocked_creators',
+  'recommendation_impressions',
+  'video_queue',
+  'content_moderation_flags',
+  'music_tracks',
+  'music_history',
+  'music_likes',
+  'music_queue',
+] as const;
+
 function removeDbArtifacts(dbFile: string) {
-  for (const suffix of ['', '-wal', '-shm']) {
+  for (const suffix of ['', '-wal', '-shm', '-journal']) {
     try {
       const target = `${dbFile}${suffix}`;
       if (fs.existsSync(target)) fs.unlinkSync(target);
@@ -381,6 +417,85 @@ function applySafeMigrations(target: CompatDatabase) {
   }
 }
 
+type NodeSqliteInstance = CompatDatabase & { close?: () => void };
+
+function isQuickCheckOk(instance: CompatDatabase): boolean {
+  try {
+    const row = instance.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined;
+    return row?.quick_check === 'ok';
+  } catch {
+    return false;
+  }
+}
+
+function rebuildHealthySqliteFromCorrupt(
+  DatabaseSyncCtor: new (file: string) => NodeSqliteInstance,
+  dbFile: string
+): NodeSqliteInstance {
+  const repairedFile = `${dbFile}.repaired`;
+  removeDbArtifacts(repairedFile);
+
+  let sourceDb: NodeSqliteInstance | null = null;
+  const freshDb = new DatabaseSyncCtor(repairedFile);
+  freshDb.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+  freshDb.exec(SCHEMA_SQL);
+  applySafeMigrations(freshDb);
+
+  try {
+    sourceDb = new DatabaseSyncCtor(dbFile);
+    freshDb.exec('PRAGMA foreign_keys = OFF;');
+    for (const table of TABLE_COPY_ORDER) {
+      try {
+        const rows = sourceDb.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>;
+        if (rows.length === 0) continue;
+        const targetCols = (
+          freshDb.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+        ).map((c) => c.name);
+        const validCols = Object.keys(rows[0]).filter((c) => targetCols.includes(c));
+        if (validCols.length === 0) continue;
+        const placeholders = validCols.map(() => '?').join(', ');
+        const insertStmt = freshDb.prepare(
+          `INSERT OR IGNORE INTO ${table} (${validCols.join(', ')}) VALUES (${placeholders})`
+        );
+        for (const row of rows) {
+          try {
+            insertStmt.run(...validCols.map((col) => row[col] ?? null));
+          } catch {
+            // skip individual malformed rows
+          }
+        }
+      } catch {
+        // skip corrupted table while preserving all healthy tables
+      }
+    }
+    freshDb.exec('PRAGMA foreign_keys = ON;');
+  } catch {
+    // proceed with cleanly initialized empty schema if source header is unreadable
+  } finally {
+    try {
+      sourceDb?.close?.();
+    } catch {
+      // ignore close error on corrupt handle
+    }
+    try {
+      freshDb.close?.();
+    } catch {
+      // ignore
+    }
+  }
+
+  removeDbArtifacts(dbFile);
+  fs.renameSync(repairedFile, dbFile);
+  const verified = new DatabaseSyncCtor(dbFile);
+  verified.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+  verified.exec(SCHEMA_SQL);
+  applySafeMigrations(verified);
+  if (!isQuickCheckOk(verified)) {
+    throw new Error('Repaired SQLite verification failed');
+  }
+  return verified;
+}
+
 function tryOpenNodeSqlite(): CompatDatabase | null {
   if (process.env.VERCEL || process.env.FORCE_SQLJS === '1') {
     return null;
@@ -388,33 +503,61 @@ function tryOpenNodeSqlite(): CompatDatabase | null {
   try {
     const req = createRequire(import.meta.url);
     const mod = req('node:sqlite') as {
-      DatabaseSync: new (file: string) => CompatDatabase;
+      DatabaseSync: new (file: string) => NodeSqliteInstance;
     };
-    const initInstance = (dbFile: string): CompatDatabase => {
+
+    const initHealthyInstance = (dbFile: string): CompatDatabase => {
       const instance = new mod.DatabaseSync(dbFile);
       try {
-        instance.exec('PRAGMA journal_mode = WAL;');
+        instance.exec('PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
       } catch {
-        // ignore if WAL unsupported
+        // ignore unsupported pragma
+      }
+      if (!isQuickCheckOk(instance)) {
+        try {
+          instance.exec('REINDEX;');
+        } catch {
+          // fall through to rebuild
+        }
+      }
+      if (!isQuickCheckOk(instance)) {
+        try {
+          instance.close?.();
+        } catch {
+          // ignore
+        }
+        console.warn(`Detected malformed SQLite image at ${dbFile}; rebuilding with intact table recovery.`);
+        return rebuildHealthySqliteFromCorrupt(mod.DatabaseSync, dbFile);
       }
       instance.exec(SCHEMA_SQL);
-      instance.prepare('SELECT COUNT(*) as c FROM users').get();
       applySafeMigrations(instance);
+      if (!isQuickCheckOk(instance)) {
+        try {
+          instance.close?.();
+        } catch {
+          // ignore
+        }
+        return rebuildHealthySqliteFromCorrupt(mod.DatabaseSync, dbFile);
+      }
       return instance;
     };
 
     try {
-      return initInstance(DB_PATH);
+      return initHealthyInstance(DB_PATH);
     } catch {
-      removeDbArtifacts(DB_PATH);
       try {
-        return initInstance(DB_PATH);
+        return rebuildHealthySqliteFromCorrupt(mod.DatabaseSync, DB_PATH);
       } catch {
-        const fallbackDir = '/tmp/doptube-data';
-        if (!fs.existsSync(fallbackDir)) fs.mkdirSync(fallbackDir, { recursive: true });
-        const fallbackPath = path.join(fallbackDir, 'doptube.db');
-        removeDbArtifacts(fallbackPath);
-        return initInstance(fallbackPath);
+        removeDbArtifacts(DB_PATH);
+        try {
+          return initHealthyInstance(DB_PATH);
+        } catch {
+          const fallbackDir = '/tmp/doptube-data';
+          if (!fs.existsSync(fallbackDir)) fs.mkdirSync(fallbackDir, { recursive: true });
+          const fallbackPath = path.join(fallbackDir, 'doptube.db');
+          removeDbArtifacts(fallbackPath);
+          return initHealthyInstance(fallbackPath);
+        }
       }
     }
   } catch {
@@ -444,7 +587,7 @@ export async function createSqlJsCompatDatabase(snapshotPath?: string): Promise<
   type SqlJsModule = {
     Database: new (data?: ArrayLike<number> | Buffer | null) => {
       run: (sql: string, params?: unknown[]) => unknown;
-      exec: (sql: string) => unknown[];
+      exec: (sql: string) => Array<{ columns: string[]; values: unknown[][] }>;
       prepare: (sql: string) => {
         bind: (params?: unknown[]) => boolean;
         step: () => boolean;
@@ -481,6 +624,11 @@ export async function createSqlJsCompatDatabase(snapshotPath?: string): Promise<
 
   let sqlDb = new SQL.Database(initialBytes);
   try {
+    const qc = sqlDb.exec('PRAGMA quick_check(1)');
+    const qcVal = qc?.[0]?.values?.[0]?.[0];
+    if (qcVal !== 'ok') {
+      throw new Error('Corrupt sql.js snapshot');
+    }
     sqlDb.exec(SCHEMA_SQL);
     const check = sqlDb.prepare('SELECT COUNT(*) as c FROM users');
     check.step();
@@ -497,7 +645,9 @@ export async function createSqlJsCompatDatabase(snapshotPath?: string): Promise<
       const dir = path.dirname(snapshotPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const data = sqlDb.export();
-      fs.writeFileSync(snapshotPath, Buffer.from(data));
+      const tmpPath = `${snapshotPath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmpPath, Buffer.from(data));
+      fs.renameSync(tmpPath, snapshotPath);
     } catch {
       // ignore disk write issues in read-only edge envs
     }

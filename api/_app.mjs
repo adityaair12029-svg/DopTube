@@ -706,8 +706,43 @@ var SCHEMA_SQL = `
     PRIMARY KEY (user_id, track_id)
   );
 `;
+var TABLE_COPY_ORDER = [
+  "users",
+  "channels",
+  "categories",
+  "languages",
+  "videos",
+  "video_variants",
+  "processing_jobs",
+  "comments",
+  "comment_replies",
+  "video_reactions",
+  "subscriptions",
+  "playlists",
+  "playlist_videos",
+  "watch_later",
+  "watch_history",
+  "search_history",
+  "notifications",
+  "reports",
+  "copyright_claims",
+  "audit_logs",
+  "user_events",
+  "user_interests",
+  "user_preferences",
+  "user_feedback",
+  "blocked_topics",
+  "blocked_creators",
+  "recommendation_impressions",
+  "video_queue",
+  "content_moderation_flags",
+  "music_tracks",
+  "music_history",
+  "music_likes",
+  "music_queue"
+];
 function removeDbArtifacts(dbFile) {
-  for (const suffix of ["", "-wal", "-shm"]) {
+  for (const suffix of ["", "-wal", "-shm", "-journal"]) {
     try {
       const target = `${dbFile}${suffix}`;
       if (fs2.existsSync(target)) fs2.unlinkSync(target);
@@ -728,6 +763,68 @@ function applySafeMigrations(target) {
   } catch {
   }
 }
+function isQuickCheckOk(instance) {
+  try {
+    const row = instance.prepare("PRAGMA quick_check(1)").get();
+    return row?.quick_check === "ok";
+  } catch {
+    return false;
+  }
+}
+function rebuildHealthySqliteFromCorrupt(DatabaseSyncCtor, dbFile) {
+  const repairedFile = `${dbFile}.repaired`;
+  removeDbArtifacts(repairedFile);
+  let sourceDb = null;
+  const freshDb = new DatabaseSyncCtor(repairedFile);
+  freshDb.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;");
+  freshDb.exec(SCHEMA_SQL);
+  applySafeMigrations(freshDb);
+  try {
+    sourceDb = new DatabaseSyncCtor(dbFile);
+    freshDb.exec("PRAGMA foreign_keys = OFF;");
+    for (const table of TABLE_COPY_ORDER) {
+      try {
+        const rows = sourceDb.prepare(`SELECT * FROM ${table}`).all();
+        if (rows.length === 0) continue;
+        const targetCols = freshDb.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+        const validCols = Object.keys(rows[0]).filter((c) => targetCols.includes(c));
+        if (validCols.length === 0) continue;
+        const placeholders = validCols.map(() => "?").join(", ");
+        const insertStmt = freshDb.prepare(
+          `INSERT OR IGNORE INTO ${table} (${validCols.join(", ")}) VALUES (${placeholders})`
+        );
+        for (const row of rows) {
+          try {
+            insertStmt.run(...validCols.map((col) => row[col] ?? null));
+          } catch {
+          }
+        }
+      } catch {
+      }
+    }
+    freshDb.exec("PRAGMA foreign_keys = ON;");
+  } catch {
+  } finally {
+    try {
+      sourceDb?.close?.();
+    } catch {
+    }
+    try {
+      freshDb.close?.();
+    } catch {
+    }
+  }
+  removeDbArtifacts(dbFile);
+  fs2.renameSync(repairedFile, dbFile);
+  const verified = new DatabaseSyncCtor(dbFile);
+  verified.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;");
+  verified.exec(SCHEMA_SQL);
+  applySafeMigrations(verified);
+  if (!isQuickCheckOk(verified)) {
+    throw new Error("Repaired SQLite verification failed");
+  }
+  return verified;
+}
 function tryOpenNodeSqlite() {
   if (process.env.VERCEL || process.env.FORCE_SQLJS === "1") {
     return null;
@@ -735,29 +832,53 @@ function tryOpenNodeSqlite() {
   try {
     const req = createRequire(import.meta.url);
     const mod = req("node:sqlite");
-    const initInstance = (dbFile) => {
+    const initHealthyInstance = (dbFile) => {
       const instance = new mod.DatabaseSync(dbFile);
       try {
-        instance.exec("PRAGMA journal_mode = WAL;");
+        instance.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;");
       } catch {
       }
+      if (!isQuickCheckOk(instance)) {
+        try {
+          instance.exec("REINDEX;");
+        } catch {
+        }
+      }
+      if (!isQuickCheckOk(instance)) {
+        try {
+          instance.close?.();
+        } catch {
+        }
+        console.warn(`Detected malformed SQLite image at ${dbFile}; rebuilding with intact table recovery.`);
+        return rebuildHealthySqliteFromCorrupt(mod.DatabaseSync, dbFile);
+      }
       instance.exec(SCHEMA_SQL);
-      instance.prepare("SELECT COUNT(*) as c FROM users").get();
       applySafeMigrations(instance);
+      if (!isQuickCheckOk(instance)) {
+        try {
+          instance.close?.();
+        } catch {
+        }
+        return rebuildHealthySqliteFromCorrupt(mod.DatabaseSync, dbFile);
+      }
       return instance;
     };
     try {
-      return initInstance(DB_PATH);
+      return initHealthyInstance(DB_PATH);
     } catch {
-      removeDbArtifacts(DB_PATH);
       try {
-        return initInstance(DB_PATH);
+        return rebuildHealthySqliteFromCorrupt(mod.DatabaseSync, DB_PATH);
       } catch {
-        const fallbackDir = "/tmp/doptube-data";
-        if (!fs2.existsSync(fallbackDir)) fs2.mkdirSync(fallbackDir, { recursive: true });
-        const fallbackPath = path2.join(fallbackDir, "doptube.db");
-        removeDbArtifacts(fallbackPath);
-        return initInstance(fallbackPath);
+        removeDbArtifacts(DB_PATH);
+        try {
+          return initHealthyInstance(DB_PATH);
+        } catch {
+          const fallbackDir = "/tmp/doptube-data";
+          if (!fs2.existsSync(fallbackDir)) fs2.mkdirSync(fallbackDir, { recursive: true });
+          const fallbackPath = path2.join(fallbackDir, "doptube.db");
+          removeDbArtifacts(fallbackPath);
+          return initHealthyInstance(fallbackPath);
+        }
       }
     }
   } catch {
@@ -797,6 +918,11 @@ async function createSqlJsCompatDatabase(snapshotPath) {
   }
   let sqlDb = new SQL.Database(initialBytes);
   try {
+    const qc = sqlDb.exec("PRAGMA quick_check(1)");
+    const qcVal = qc?.[0]?.values?.[0]?.[0];
+    if (qcVal !== "ok") {
+      throw new Error("Corrupt sql.js snapshot");
+    }
     sqlDb.exec(SCHEMA_SQL);
     const check = sqlDb.prepare("SELECT COUNT(*) as c FROM users");
     check.step();
@@ -812,7 +938,9 @@ async function createSqlJsCompatDatabase(snapshotPath) {
       const dir = path2.dirname(snapshotPath);
       if (!fs2.existsSync(dir)) fs2.mkdirSync(dir, { recursive: true });
       const data = sqlDb.export();
-      fs2.writeFileSync(snapshotPath, Buffer.from(data));
+      const tmpPath = `${snapshotPath}.tmp.${process.pid}`;
+      fs2.writeFileSync(tmpPath, Buffer.from(data));
+      fs2.renameSync(tmpPath, snapshotPath);
     } catch {
     }
   };

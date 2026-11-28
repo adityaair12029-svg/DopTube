@@ -528,3 +528,30 @@ test('mapDailymotionItem decodes HTML entities and tags cleanly in metadata', ()
   assert.equal(mapped.channelName, 'Space & Science IN');
   assert.equal(mapped.description.includes('&amp;'), false);
 });
+
+test('createSqlJsCompatDatabase self-heals cleanly when disk snapshot bytes are malformed', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const tmpFile = path.join(os.tmpdir(), `doptube-corrupt-${Date.now()}.sqlite`);
+  fs.writeFileSync(tmpFile, Buffer.from('not-a-valid-sqlite-header-or-corrupt-btree-pages'));
+  try {
+    const recovered = await createSqlJsCompatDatabase(tmpFile);
+    const qc = recovered.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined;
+    assert.equal(qc?.quick_check, 'ok');
+    recovered
+      .prepare(`INSERT INTO categories (name) VALUES (?)`)
+      .run('RecoveredCategory');
+    const row = recovered.prepare(`SELECT name FROM categories WHERE name = ?`).get('RecoveredCategory') as
+      | { name: string }
+      | undefined;
+    assert.equal(row?.name, 'RecoveredCategory');
+  } finally {
+    try {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    } catch {
+      // ignore
+    }
+  }
+});
+
