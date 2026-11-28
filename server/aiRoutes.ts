@@ -14,7 +14,13 @@ import {
 } from './aiService.ts';
 import { rateLimit, requireAdmin, requireAuth, type AuthedRequest } from './auth.ts';
 import { db } from './db.ts';
-import { fetchExternalFeedPaged, fetchExternalVideoById, getDiscoveryStatus, type DiscoveryResult } from './discovery.ts';
+import {
+  fetchExternalDiscovery,
+  fetchExternalFeedPaged,
+  fetchExternalVideoById,
+  getDiscoveryStatus,
+  type DiscoveryResult,
+} from './discovery.ts';
 import { filterAndSortVideos, INDIAN_LANGUAGES } from './domain.ts';
 import {
   buildConditionalSections,
@@ -90,7 +96,12 @@ export function registerAiAndLibraryRoutes(
       const filtered = filterAndSortVideos(hydrated, { category, language });
       const valid = filtered
         .map(toCandidate)
-        .filter((v) => validateContentCandidate(v, ctx.validation).valid);
+        .filter((v) => validateContentCandidate(v, ctx.validation).valid)
+        .map((v) => ({
+          ...v,
+          recommendationReasons: ['Subscribed creator', `In ${v.language}`],
+          recommendationReason: 'Subscribed creator',
+        }));
       const slice = valid.slice(cursor, cursor + limit);
       const nextCursor = cursor + slice.length < valid.length ? cursor + slice.length : null;
 
@@ -336,6 +347,30 @@ export function registerAiAndLibraryRoutes(
     if (!current) {
       res.json({ videos: [] });
       return;
+    }
+
+    if (extRelated.length < 4) {
+      const topicWords = current.title
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3)
+        .slice(0, 4)
+        .join(' ');
+      const fallbackTopic = topicWords || current.tags[0] || current.category;
+      if (fallbackTopic) {
+        try {
+          const extra = await fetchExternalDiscovery(fallbackTopic, current.language);
+          const seenExt = new Set(extRelated.map((r) => r.id));
+          for (const item of extra) {
+            if (item.id !== current.id && !item.isShort && !seenExt.has(item.id)) {
+              extRelated.push(item);
+              seenExt.add(item.id);
+            }
+          }
+        } catch {
+          // ignore transient discovery failure
+        }
+      }
     }
 
     const ranked = getRelatedCandidatePool(current, ctx, extRelated);

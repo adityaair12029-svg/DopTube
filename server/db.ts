@@ -177,6 +177,7 @@ const SCHEMA_SQL = `
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     query TEXT NOT NULL,
     preview_thumb TEXT NOT NULL DEFAULT '',
+    search_count INTEGER NOT NULL DEFAULT 1,
     searched_at TEXT NOT NULL
   );
 
@@ -411,6 +412,10 @@ function applySafeMigrations(target: CompatDatabase) {
     }
     if (!cols.some((c) => c.name === 'birthday')) {
       target.exec(`ALTER TABLE users ADD COLUMN birthday TEXT NOT NULL DEFAULT ''`);
+    }
+    const shCols = target.prepare(`PRAGMA table_info(search_history)`).all() as Array<{ name: string }>;
+    if (shCols.length > 0 && !shCols.some((c) => c.name === 'search_count')) {
+      target.exec(`ALTER TABLE search_history ADD COLUMN search_count INTEGER NOT NULL DEFAULT 1`);
     }
   } catch {
     // ignore migration error if already present

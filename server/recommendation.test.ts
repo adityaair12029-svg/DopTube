@@ -379,4 +379,56 @@ test('buildConditionalSections includes discover_new_creators and popular_langua
   assert.equal(sections.some((s) => s.id === 'trending_india'), true);
 });
 
+test('rankRelatedVideos prioritizes videos matching the playing video title topic and attaches clear recommendation reasons', () => {
+  const current = makeCandidate({
+    id: 'cur_quantum',
+    title: 'Electromagnetism JEE Physics One Shot',
+    category: 'Education',
+    language: 'Hindi',
+    tags: ['physics', 'jee'],
+    channelId: 'ch_main',
+  });
+  const unrelatedSameCat = makeCandidate({
+    id: 'rel_bio',
+    title: 'Organic Chemistry Naming Rules Lecture',
+    category: 'Education',
+    language: 'Hindi',
+    tags: ['chemistry'],
+    channelId: 'ch_chem',
+    views: 80_000,
+  });
+  const matchingTitleTopic = makeCandidate({
+    id: 'rel_emag',
+    title: 'Electromagnetism & Maxwell Equations JEE Numericals',
+    category: 'Education',
+    language: 'Hindi',
+    tags: ['physics', 'maxwell'],
+    channelId: 'ch_phy',
+    views: 65_000,
+  });
+
+  const ctx = makeAiContext({
+    watchedVideoIds: new Set(['cur_quantum']),
+    preferredLanguages: ['Hindi'],
+  });
+  const ranked = rankRelatedVideos(current, [unrelatedSameCat, matchingTitleTopic], ctx);
+  assert.equal(ranked[0].id, 'rel_emag');
+  assert.ok(ranked[0].recommendationReason);
+  assert.ok(ranked[0].recommendationReasons.some((r) => r.includes('Because you watched')));
+
+  const homeScored = scoreCandidateWithReason(
+    makeCandidate({
+      id: 'v_lang_trend',
+      category: 'Education',
+      language: 'Hindi',
+      views: 150_000,
+      likes: 9000,
+    }),
+    ctx
+  );
+  assert.ok(homeScored.recommendationReasons.some((r) => r.includes('Trending in your language')));
+  assert.ok(homeScored.recommendationReasons.some((r) => r.includes('Recommended based on your interests')));
+});
+
+
 

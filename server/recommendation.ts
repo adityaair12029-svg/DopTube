@@ -235,21 +235,33 @@ export function scoreCandidateWithReason(
   if (isSubscribed) {
     recommendationReasons.push('Subscribed creator');
   }
+  if (creatorWatches > 0 && !isSubscribed) {
+    recommendationReasons.push(`Because you watched ${video.channelName}`);
+  } else if (ctx.watchedVideoIds.size > 0 && (matchesPreferredCategory || topMatchedTopic)) {
+    recommendationReasons.push(`Because you watched ${topMatchedTopic || video.category}`);
+  }
   if (ctx.personalizationEnabled && (topMatchedTopic || matchesPreferredCategory)) {
     const topicLabel = topMatchedTopic || video.category;
-    recommendationReasons.push(`Matches your interest in ${topicLabel}`);
+    recommendationReasons.push(`Recommended based on your interests (${topicLabel})`);
   }
   if (matchesRecentSearch) {
     recommendationReasons.push('Matches your recent search');
   }
   if (matchesLanguage) {
-    recommendationReasons.push(`In your preferred language (${video.language})`);
+    if (video.views >= 25_000 || video.isLive || ageHours <= 72) {
+      recommendationReasons.push(`Trending in your language (${video.language})`);
+    } else {
+      recommendationReasons.push(`In your preferred language (${video.language})`);
+    }
   }
   if (ageHours <= 72) {
     recommendationReasons.push('Fresh upload');
   }
   if (video.views >= 100_000 || video.isLive) {
     recommendationReasons.push('Popular in India');
+  }
+  if (recommendationReasons.length === 0) {
+    recommendationReasons.push(`Featured in ${video.category}`);
   }
 
   return {
@@ -382,45 +394,130 @@ export function generatePersonalizedRecommendations(
   };
 }
 
-export function rankTrendingIndia(candidates: CandidateVideo[], ctx: ValidationContext, nowMs = Date.now()): CandidateVideo[] {
+const RELATED_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'your', 'into', 'about', 'what', 'when',
+  'how', 'why', 'who', 'all', 'best', 'top', 'new', 'full', 'video', 'videos', 'official',
+  'live', 'hindi', 'english', 'india', 'indian', 'latest', 'episode', 'part', 'shorts',
+]);
+
+function extractSignificantTerms(text: string): string[] {
+  return Array.from(
+    new Set(
+      (text || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !RELATED_STOP_WORDS.has(w) && !/^\d+$/.test(w))
+    )
+  );
+}
+
+export function rankTrendingIndia(
+  candidates: CandidateVideo[],
+  ctx: ValidationContext,
+  nowMs = Date.now()
+): Array<CandidateVideo & { recommendationReasons: string[]; recommendationReason?: string }> {
   const valid = candidates.filter((c) => validateContentCandidate(c, ctx).valid);
-  return [...valid].sort((a, b) => {
-    const score = (v: CandidateVideo) => {
-      const ageHours = Math.max(1, (nowMs - new Date(v.createdAt).getTime()) / (1000 * 60 * 60));
-      const velocity = v.views / Math.pow(ageHours + 2, 0.75);
-      const engagement = (v.likes * 3) / Math.max(50, v.views);
-      const spamDampener = v.dislikes > v.likes ? 0.5 : 1;
-      return (Math.log10(Math.max(10, v.views)) * 15 + Math.log10(Math.max(1, velocity)) * 20 + engagement * 40) * spamDampener;
-    };
-    return score(b) - score(a);
-  });
+  return [...valid]
+    .sort((a, b) => {
+      const score = (v: CandidateVideo) => {
+        const ageHours = Math.max(1, (nowMs - new Date(v.createdAt).getTime()) / (1000 * 60 * 60));
+        const velocity = v.views / Math.pow(ageHours + 2, 0.75);
+        const engagement = (v.likes * 3) / Math.max(50, v.views);
+        const spamDampener = v.dislikes > v.likes ? 0.5 : 1;
+        return (Math.log10(Math.max(10, v.views)) * 15 + Math.log10(Math.max(1, velocity)) * 20 + engagement * 40) * spamDampener;
+      };
+      return score(b) - score(a);
+    })
+    .map((v) => {
+      const reason = `Trending in ${v.language || 'India'}`;
+      return {
+        ...v,
+        recommendationReasons: [reason, `Popular in ${v.category}`],
+        recommendationReason: reason,
+      };
+    });
 }
 
 export function rankRelatedVideos(
   currentVideo: CandidateVideo,
   candidates: CandidateVideo[],
   ctx: UserAiContext
-): CandidateVideo[] {
+): Array<CandidateVideo & { recommendationReasons: string[]; recommendationReason?: string }> {
   const valid = candidates.filter(
     (c) => c.id !== currentVideo.id && !c.isShort && validateContentCandidate(c, ctx.validation).valid
   );
-  const currentTags = new Set(currentVideo.tags.map((t) => t.toLowerCase()));
-
-  const sorted = [...valid].sort((a, b) => {
-    const simScore = (v: CandidateVideo) => {
-      let s = scoreCandidate(v, ctx) * 0.4;
-      if (v.category === currentVideo.category) s += 35;
-      if (v.language === currentVideo.language) s += 18;
-      if (v.channelId === currentVideo.channelId) s += 12;
-      for (const tag of v.tags) {
-        if (currentTags.has(tag.toLowerCase())) s += 12;
-      }
-      return s;
-    };
-    return simScore(b) - simScore(a);
+  const seenIds = new Set<string>();
+  const unique = valid.filter((c) => {
+    if (seenIds.has(c.id)) return false;
+    seenIds.add(c.id);
+    return true;
   });
 
-  return diversifyFeed(sorted, 2, 3);
+  const currentTags = new Set(currentVideo.tags.map((t) => t.toLowerCase()));
+  const currentTitleTerms = extractSignificantTerms(currentVideo.title);
+  const currentTitleSet = new Set(currentTitleTerms);
+  const shortSourceTitle =
+    currentVideo.title.length > 42 ? `${currentVideo.title.slice(0, 39).trim()}...` : currentVideo.title;
+
+  const scored = unique
+    .map((v) => {
+      const base = scoreCandidateWithReason(v, ctx);
+      const candTerms = extractSignificantTerms(`${v.title} ${v.tags.join(' ')}`);
+      let titleMatchCount = 0;
+      for (const term of candTerms) {
+        if (currentTitleSet.has(term)) titleMatchCount += 1;
+      }
+      let tagMatchCount = 0;
+      for (const tag of v.tags) {
+        if (currentTags.has(tag.toLowerCase())) tagMatchCount += 1;
+      }
+
+      const sameCategory = v.category === currentVideo.category;
+      const sameLanguage = v.language === currentVideo.language;
+      const sameCreator = v.channelId === currentVideo.channelId;
+
+      const engagementRatio = v.views >= 20 ? Math.min(0.18, v.likes / Math.max(20, v.views)) : 0;
+      const qualityBonus =
+        Math.log10(Math.max(10, v.views)) * 2.4 +
+        (v.channelVerified ? 6 : 0) +
+        engagementRatio * 45;
+
+      const simScore =
+        base.score * 0.45 +
+        Math.min(64, titleMatchCount * 20) +
+        Math.min(36, tagMatchCount * 12) +
+        (sameCategory ? 32 : 0) +
+        (sameLanguage ? 16 : 0) +
+        (sameCreator ? 14 : 0) +
+        qualityBonus;
+
+      const reasons: string[] = [];
+      if (titleMatchCount > 0 || tagMatchCount > 0) {
+        reasons.push(`Because you watched "${shortSourceTitle}"`);
+      }
+      if (sameCreator) {
+        reasons.push(`More from ${currentVideo.channelName}`);
+      }
+      if (sameCategory && sameLanguage) {
+        reasons.push(`Similar ${v.category} in ${v.language}`);
+      } else if (sameCategory) {
+        reasons.push(`Similar in ${v.category}`);
+      }
+      for (const r of base.recommendationReasons) {
+        if (!reasons.includes(r)) reasons.push(r);
+      }
+
+      return {
+        ...v,
+        _simScore: simScore,
+        recommendationReasons: reasons,
+        recommendationReason: reasons[0],
+      };
+    })
+    .sort((a, b) => b._simScore - a._simScore);
+
+  return diversifyFeed(scored, 2, 3).map(({ _simScore: _unused, ...rest }) => rest);
 }
 
 export type ShortsFeedMode = 'for_you' | 'following' | 'trending' | 'new_creators';

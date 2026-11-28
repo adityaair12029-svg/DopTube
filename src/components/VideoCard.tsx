@@ -71,6 +71,54 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       ? Math.min(100, Math.round((video.progressSec / video.durationSec) * 100))
       : 0;
 
+  const reasonsList =
+    video.recommendationReasons && video.recommendationReasons.length > 0
+      ? video.recommendationReasons
+      : video.recommendationReason
+      ? [video.recommendationReason]
+      : [];
+  const hasReasons = reasonsList.length > 0;
+
+  const whyThisVideoControl = hasReasons ? (
+    <div className="mt-1.5">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setReasonOpen((v) => !v);
+        }}
+        aria-expanded={reasonOpen}
+        aria-label={`Why this video: ${video.title}`}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-[#536471] dark:text-[#8b98a5] hover:text-[#1d4ed8] dark:hover:text-[#38bdf8] transition-colors cursor-pointer"
+      >
+        <Info className="w-3 h-3 shrink-0" />
+        <span className="underline decoration-dotted underline-offset-2">Why this video?</span>
+      </button>
+      {reasonOpen && (
+        <div
+          role="tooltip"
+          className="mt-1.5 px-2.5 py-2 rounded-lg bg-[var(--dt-surface)] border border-[var(--dt-border)] shadow-md text-xs text-[var(--dt-text)] flex items-start justify-between gap-2"
+        >
+          <div className="min-w-0 leading-relaxed">
+            <span className="font-semibold text-[#1d4ed8] dark:text-[#38bdf8]">Recommended for you: </span>
+            <span>{reasonsList.slice(0, 2).join(' · ')}</span>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setReasonOpen(false);
+            }}
+            aria-label="Dismiss recommendation reason"
+            className="p-0.5 rounded hover:bg-[var(--dt-surface-hover)] shrink-0 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const thumbnailBox = (
     <div
       className={`relative overflow-hidden bg-[#eff3f4] dark:bg-[#16181c] shrink-0 group ${
@@ -142,7 +190,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       </button>
       {menuOpen && (
         <div className="absolute right-0 top-9 w-56 rounded-xl bg-[var(--dt-surface)] border border-[var(--dt-border)] shadow-2xl py-1.5 z-40 text-sm">
-          {video.recommendationReason && (
+          {hasReasons && (
             <button
               type="button"
               onClick={() => {
@@ -295,6 +343,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           <p className="text-[12px] text-[#536471] dark:text-[#71767b] font-mono-nums">
             {formatViews(video.views)} views · {formatRelativeTime(video.createdAt)}
           </p>
+          {whyThisVideoControl}
         </div>
         {actionMenu}
       </div>
@@ -334,6 +383,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             <p className="text-[13px] text-[#536471] dark:text-[#71767b] line-clamp-2 leading-relaxed">
               {video.description}
             </p>
+            {whyThisVideoControl}
           </div>
           {actionMenu}
         </div>
@@ -382,26 +432,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             {formatViews(video.views)} views · {video.isLive ? 'Streaming live' : formatRelativeTime(video.createdAt)}
           </p>
 
-          {reasonOpen && video.recommendationReason && (
-            <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-[var(--dt-surface)] border border-[var(--dt-border)] text-xs text-[var(--dt-text)] flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <span className="font-semibold text-[#1d4ed8] dark:text-[#38bdf8]">Why recommended: </span>
-                <span>
-                  {video.recommendationReasons && video.recommendationReasons.length > 0
-                    ? video.recommendationReasons.slice(0, 2).join(' · ')
-                    : video.recommendationReason}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setReasonOpen(false)}
-                aria-label="Dismiss recommendation reason"
-                className="p-0.5 rounded hover:bg-[var(--dt-surface-hover)] shrink-0 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
+          {whyThisVideoControl}
         </div>
 
         {actionMenu}

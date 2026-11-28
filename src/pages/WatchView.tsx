@@ -78,6 +78,22 @@ export const WatchView: React.FC<WatchViewProps> = ({
   const [nextUp, setNextUp] = useState<{ video: VideoItem; countdown: number } | null>(null);
   const startWatchTsRef = useRef<number>(Date.now());
   const completedRef = useRef<boolean>(false);
+  const onRedirectToShortRef = useRef(onRedirectToShort);
+  const onVideoLoadedRef = useRef(onVideoLoaded);
+
+  useEffect(() => {
+    onRedirectToShortRef.current = onRedirectToShort;
+  }, [onRedirectToShort]);
+
+  useEffect(() => {
+    onVideoLoadedRef.current = onVideoLoaded;
+  }, [onVideoLoaded]);
+
+  useEffect(() => {
+    return () => {
+      onVideoLoadedRef.current?.(null);
+    };
+  }, []);
 
   const [commentBody, setCommentBody] = useState('');
   const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
@@ -98,19 +114,19 @@ export const WatchView: React.FC<WatchViewProps> = ({
     ])
       .then(([vRes, cRes, recRelated]) => {
         if (cancelled) return;
-        if (vRes.video?.isShort && onRedirectToShort) {
-          onRedirectToShort(vRes.video);
+        if (vRes.video?.isShort && onRedirectToShortRef.current) {
+          onRedirectToShortRef.current(vRes.video);
           return;
         }
         setVideo(vRes.video);
-        onVideoLoaded?.(vRes.video);
+        onVideoLoadedRef.current?.(vRes.video);
         setRelated(recRelated.videos.length > 0 ? recRelated.videos : vRes.related);
         setComments(cRes.comments);
       })
       .catch(() => {
         if (!cancelled) {
           setVideo(null);
-          onVideoLoaded?.(null);
+          onVideoLoadedRef.current?.(null);
         }
       })
       .finally(() => {
@@ -118,7 +134,6 @@ export const WatchView: React.FC<WatchViewProps> = ({
       });
 
     return () => {
-      onVideoLoaded?.(null);
       // Emit skip event if viewer exits quickly (< 12s) without completing
       const watchedSec = Math.floor((Date.now() - startWatchTsRef.current) / 1000);
       if (!completedRef.current && watchedSec > 1 && watchedSec < 12) {
@@ -130,7 +145,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
       }
       cancelled = true;
     };
-  }, [videoId, onRedirectToShort, onVideoLoaded]);
+  }, [videoId]);
 
   // Countdown tick for Next Video Autoplay
   useEffect(() => {

@@ -7,6 +7,7 @@ import multer from 'multer';
 import {
   buildUserAiContext,
   ensureUserPreferencesRow,
+  getRelatedCandidatePool,
   getUserPreferencesPayload,
   hydrateVideoRow,
   toCandidate,
@@ -27,6 +28,7 @@ import {
 import { db, ensureDbReady, getChannelAvatarSvg, getVideoThumbnailSvg, seedDatabaseIfEmpty } from './db.ts';
 import {
   fetchExternalChannelById,
+  fetchExternalDiscovery,
   fetchExternalDiscoveryPaged,
   fetchExternalFeed,
   fetchExternalFeedPaged,
@@ -41,6 +43,8 @@ import {
   filterAndSortVideos,
   hashPassword,
   INDIAN_LANGUAGES,
+  isLowQualitySearchQuery,
+  rankSearchSuggestions,
   rankVideos,
   signSessionToken,
   validateCommentInput,
@@ -49,6 +53,7 @@ import {
   verifyPassword,
   VIDEO_CATEGORIES,
   type RankableVideo,
+  type SearchUserSignals,
 } from './domain.ts';
 import { verifyFirebaseGoogleToken } from './firebaseAdmin.ts';
 import {
@@ -908,17 +913,32 @@ app.get('/api/videos/:id', asyncRoute(async (req: AuthedRequest, res) => {
     }
   }
 
-  const relatedRows = db.prepare(`
-    SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
-           c.verified as channel_verified, c.subscriber_count
-    FROM videos v
-    JOIN channels c ON c.id = v.channel_id
-    WHERE v.id != ? AND v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'native' AND v.is_short = 0
-    ORDER BY (CASE WHEN v.category = ? THEN 1 ELSE 0 END) DESC, v.views DESC
-    LIMIT 8
-  `).all(id, videoData.category) as unknown as VideoRow[];
+  if (extRelated.length < 4 && !videoData.isShort) {
+    const topicWords = videoData.title
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3)
+      .slice(0, 4)
+      .join(' ');
+    const fallbackTopic = topicWords || videoData.tags?.[0] || videoData.category;
+    if (fallbackTopic) {
+      try {
+        const extra = await fetchExternalDiscovery(fallbackTopic, videoData.language);
+        const seenExt = new Set(extRelated.map((r) => r.id));
+        for (const item of extra) {
+          if (item.id !== videoData.id && !item.isShort && !seenExt.has(item.id)) {
+            extRelated.push(item);
+            seenExt.add(item.id);
+          }
+        }
+      } catch {
+        // ignore transient discovery failure
+      }
+    }
+  }
 
-  const combinedRelated = [...extRelated, ...relatedRows.map(hydrateVideoRow)].slice(0, 14);
+  const aiCtx = buildUserAiContext(req.auth?.userId);
+  const combinedRelated = getRelatedCandidatePool(toCandidate(videoData), aiCtx, extRelated).slice(0, 14);
 
   res.json({
     video: {
@@ -1134,6 +1154,58 @@ app.delete('/api/videos/:id', requireAuth, (req: AuthedRequest, res) => {
 // UNIFIED SEARCH & SUGGESTIONS (WITH PAGE TOKEN PAGINATION)
 // =========================================================================
 
+let lastSearchPruneMs = 0;
+
+function pruneDeadSearchTerms(userId?: string) {
+  const nowMs = Date.now();
+  const shouldGlobalPrune = nowMs - lastSearchPruneMs > 15 * 60 * 1000;
+  if (!shouldGlobalPrune && !userId) return;
+
+  try {
+    if (shouldGlobalPrune) {
+      lastSearchPruneMs = nowMs;
+      const staleCutoffIso = new Date(nowMs - 60 * 24 * 60 * 60 * 1000).toISOString();
+      db.prepare(`DELETE FROM search_history WHERE searched_at < ? AND COALESCE(search_count, 1) <= 1`).run(
+        staleCutoffIso
+      );
+      const recentRows = db
+        .prepare(`SELECT id, query FROM search_history ORDER BY searched_at DESC LIMIT 200`)
+        .all() as Array<{ id: string; query: string }>;
+      for (const row of recentRows) {
+        if (isLowQualitySearchQuery(row.query)) {
+          db.prepare(`DELETE FROM search_history WHERE id = ?`).run(row.id);
+        }
+      }
+    }
+
+    if (userId) {
+      const userRows = db
+        .prepare(`
+          SELECT id, query
+          FROM search_history
+          WHERE user_id = ?
+          ORDER BY searched_at DESC, COALESCE(search_count, 1) DESC
+        `)
+        .all(userId) as Array<{ id: string; query: string }>;
+      const badIds: string[] = [];
+      let keptCount = 0;
+      for (const row of userRows) {
+        if (isLowQualitySearchQuery(row.query)) {
+          badIds.push(row.id);
+        } else {
+          keptCount += 1;
+          if (keptCount > 40) badIds.push(row.id);
+        }
+      }
+      for (const badId of badIds) {
+        db.prepare(`DELETE FROM search_history WHERE id = ?`).run(badId);
+      }
+    }
+  } catch {
+    // ignore cleanup failures
+  }
+}
+
 app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
   const {
     q = '',
@@ -1149,6 +1221,16 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
     ? (uploadDate as 'any' | 'today' | 'week' | 'month')
     : 'any';
 
+  const ctx = buildUserAiContext(req.auth?.userId);
+  const userSignals: SearchUserSignals | undefined = req.auth
+    ? {
+        preferredLanguages: ctx.preferredLanguages,
+        preferredCategories: ctx.preferredCategories,
+        interestScores: ctx.interestScores,
+        subscribedChannelIds: ctx.subscribedChannelIds,
+      }
+    : undefined;
+
   let nativeMatches: ReturnType<typeof hydrateVideoRow>[] = [];
   let channelMatches: unknown[] = [];
 
@@ -1161,7 +1243,9 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
       WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'native'
     `).all() as unknown as VideoRow[];
 
-    const hydrated = rows.map(hydrateVideoRow);
+    const hydrated = rows
+      .map(hydrateVideoRow)
+      .filter((v) => validateContentCandidate(toCandidate(v), ctx.validation).valid);
     nativeMatches = filterAndSortVideos(hydrated as (ReturnType<typeof hydrateVideoRow> & RankableVideo)[], {
       query: q,
       category,
@@ -1169,6 +1253,7 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
       sort: sort as 'relevance' | 'date' | 'views',
       duration: duration as 'all' | 'short' | 'medium' | 'long',
       uploadDate: validUploadDate,
+      userSignals,
     });
 
     channelMatches = q.trim()
@@ -1185,6 +1270,10 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
     ? await fetchExternalDiscoveryPaged(q, language, cleanToken)
     : await fetchExternalFeedPaged({ category, language, pageToken: cleanToken });
 
+  const validExtItems = extPaged.items.filter((v) =>
+    validateContentCandidate(toCandidate(v), ctx.validation).valid
+  );
+
   const searchOpts = {
     query: q.trim() ? q : undefined,
     category,
@@ -1192,9 +1281,10 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
     duration: duration as 'all' | 'short' | 'medium' | 'long',
     uploadDate: validUploadDate,
     sort: sort as 'relevance' | 'date' | 'views',
+    userSignals,
   };
 
-  let externalMatches = filterAndSortVideos(extPaged.items, {
+  const externalMatches = filterAndSortVideos(validExtItems, {
     ...searchOpts,
     suppressLowViewSpam: true,
     minTermMatchRatio: 1,
@@ -1202,7 +1292,7 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
 
   let usedRelaxed = false;
   if (q.trim() && externalMatches.length < 4) {
-    const ytOnly = extPaged.items.filter((v) => v.id.startsWith('ext_'));
+    const ytOnly = validExtItems.filter((v) => v.id.startsWith('ext_'));
     const relaxedExt = filterAndSortVideos(ytOnly, {
       ...searchOpts,
       suppressLowViewSpam: true,
@@ -1240,19 +1330,27 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
     if (mergedChannels.length >= 6) break;
   }
 
-  if (!cleanToken && req.auth && q.trim().length >= 2) {
+  const cleanQ = q.trim().replace(/\s+/g, ' ');
+  if (!cleanToken && req.auth && cleanQ.length >= 2 && !isLowQualitySearchQuery(cleanQ)) {
     const uid = req.auth.userId;
     const userPref = db.prepare('SELECT history_paused FROM users WHERE id = ?').get(uid) as { history_paused: number } | undefined;
     if (userPref && userPref.history_paused === 0) {
       const topThumb = combined[0]?.thumbnailUrl ?? '';
-      db.prepare('DELETE FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)').run(uid, q.trim());
-      db.prepare('INSERT INTO search_history (id, user_id, query, preview_thumb, searched_at) VALUES (?, ?, ?, ?, ?)').run(
-        `sh_${randomUUID().slice(0, 8)}`,
-        uid,
-        q.trim(),
-        topThumb,
-        new Date().toISOString()
-      );
+      const existingHist = db
+        .prepare('SELECT id, search_count FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)')
+        .get(uid, cleanQ) as { id: string; search_count?: number } | undefined;
+      const nowIso = new Date().toISOString();
+      if (existingHist) {
+        db.prepare(`
+          UPDATE search_history
+          SET query = ?, preview_thumb = COALESCE(NULLIF(?, ''), preview_thumb), search_count = COALESCE(search_count, 1) + 1, searched_at = ?
+          WHERE id = ?
+        `).run(cleanQ, topThumb, nowIso, existingHist.id);
+      } else {
+        db.prepare(
+          'INSERT INTO search_history (id, user_id, query, preview_thumb, search_count, searched_at) VALUES (?, ?, ?, ?, 1, ?)'
+        ).run(`sh_${randomUUID().slice(0, 8)}`, uid, cleanQ, topThumb, nowIso);
+      }
     }
   }
 
@@ -1267,35 +1365,59 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
 
 app.get('/api/search/suggestions', (req: AuthedRequest, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
-  const historyRows = req.auth
+  pruneDeadSearchTerms(req.auth?.userId);
+
+  const ctx = buildUserAiContext(req.auth?.userId);
+
+  const rawHistoryRows = req.auth
     ? (db.prepare(`
-        SELECT id, query, preview_thumb as previewThumb, searched_at as searchedAt
+        SELECT id, query, preview_thumb as previewThumb, COALESCE(search_count, 1) as searchCount, searched_at as searchedAt
         FROM search_history
         WHERE user_id = ? AND (? = '' OR LOWER(query) LIKE ?)
         ORDER BY searched_at DESC
-        LIMIT 6
-      `).all(req.auth.userId, q, `%${q}%`) as Array<{ id: string; query: string; previewThumb: string }>)
+        LIMIT 30
+      `).all(req.auth.userId, q, `%${q}%`) as Array<{
+        id: string;
+        query: string;
+        previewThumb: string;
+        searchCount: number;
+        searchedAt: string;
+      }>)
     : [];
+
+  const rankedHistory = rankSearchSuggestions(rawHistoryRows, {
+    prefixQuery: q,
+    interestScores: ctx.interestScores,
+    interestTopics: ctx.selectedInterests,
+    limit: 6,
+  });
 
   const videoSuggestions = q
     ? (db.prepare(`
-        SELECT title, thumbnail_url as previewThumb
+        SELECT title as query, thumbnail_url as previewThumb, views, created_at as searchedAt
         FROM videos
-        WHERE visibility = 'public' AND status = 'published' AND (LOWER(title) LIKE ? OR LOWER(tags_json) LIKE ?)
+        WHERE visibility = 'public' AND status = 'published' AND views >= 100 AND (LOWER(title) LIKE ? OR LOWER(tags_json) LIKE ?)
         ORDER BY views DESC
-        LIMIT 6
-      `).all(`%${q}%`, `%${q}%`) as Array<{ title: string; previewThumb: string }>)
+        LIMIT 25
+      `).all(`%${q}%`, `%${q}%`) as Array<{ query: string; previewThumb: string; views: number; searchedAt: string }>)
     : (db.prepare(`
-        SELECT title, thumbnail_url as previewThumb
+        SELECT title as query, thumbnail_url as previewThumb, views, created_at as searchedAt
         FROM videos
-        WHERE visibility = 'public' AND status = 'published'
+        WHERE visibility = 'public' AND status = 'published' AND views >= 500
         ORDER BY views DESC
-        LIMIT 5
-      `).all() as Array<{ title: string; previewThumb: string }>);
+        LIMIT 25
+      `).all() as Array<{ query: string; previewThumb: string; views: number; searchedAt: string }>);
+
+  const rankedSuggestions = rankSearchSuggestions(videoSuggestions, {
+    prefixQuery: q,
+    interestScores: ctx.interestScores,
+    interestTopics: ctx.selectedInterests,
+    limit: 6,
+  });
 
   res.json({
-    history: historyRows,
-    suggestions: videoSuggestions.map((v) => ({ query: v.title, previewThumb: v.previewThumb })),
+    history: rankedHistory,
+    suggestions: rankedSuggestions,
   });
 });
 

@@ -186,30 +186,152 @@ function filterAndSortVideos(videos, opts) {
   if (opts.sort === "views") {
     return candidates.sort((a, b) => b.views - a.views);
   }
-  if (terms.length > 0) {
+  if (terms.length > 0 || opts.userSignals) {
+    const userSignals = opts.userSignals;
+    const prefLangs = new Set((userSignals?.preferredLanguages ?? []).map((l) => l.toLowerCase()));
+    const prefCats = new Set((userSignals?.preferredCategories ?? []).map((c) => c.toLowerCase()));
+    const interestEntries = Object.entries(userSignals?.interestScores ?? {});
     const scoreSearchRelevance = (v) => {
       const titleLower = v.title.toLowerCase();
       const tagsLower = v.tags.join(" ").toLowerCase();
       const catLower = v.category.toLowerCase();
       const channelLower = (v.channelName ?? "").toLowerCase();
-      const exactTitlePhrase = q.length >= 2 && titleLower.includes(q) ? 55 : 0;
-      const exactChannelPhrase = q.length >= 2 && channelLower.includes(q) ? 28 : 0;
-      const termScore = terms.reduce((acc, t) => {
-        if (titleLower.includes(t)) return acc + 28;
-        if (tagsLower.includes(t) || catLower.includes(t)) return acc + 12;
-        if (channelLower.includes(t)) return acc + 8;
-        return acc + 2;
-      }, 0);
-      const allInTitleBonus = terms.every((t) => titleLower.includes(t)) ? 30 : 0;
+      const fullHaystack = `${titleLower} ${tagsLower} ${catLower} ${v.description.toLowerCase()}`;
+      let relevanceScore = 0;
+      if (terms.length > 0) {
+        const exactTitlePhrase = q.length >= 2 && titleLower.includes(q) ? 55 : 0;
+        const exactChannelPhrase = q.length >= 2 && channelLower.includes(q) ? 28 : 0;
+        const termScore = terms.reduce((acc, t) => {
+          if (titleLower.includes(t)) return acc + 28;
+          if (tagsLower.includes(t) || catLower.includes(t)) return acc + 12;
+          if (channelLower.includes(t)) return acc + 8;
+          return acc + 2;
+        }, 0);
+        const allInTitleBonus = terms.every((t) => titleLower.includes(t)) ? 30 : 0;
+        relevanceScore = exactTitlePhrase + exactChannelPhrase + termScore + allInTitleBonus;
+      }
       const viewScore = Math.log10(Math.max(10, v.views)) * 12;
-      const verifiedBonus = v.channelVerified ? 22 : 0;
-      const subBonus = v.subscriberCount ? Math.min(18, Math.log10(Math.max(10, v.subscriberCount)) * 2.5) : 0;
-      const lowViewPenalty = v.views < 500 && !v.channelVerified ? -45 : v.views < 2e3 && !v.channelVerified ? -15 : 0;
-      return exactTitlePhrase + exactChannelPhrase + termScore + allInTitleBonus + viewScore + verifiedBonus + subBonus + lowViewPenalty;
+      const verifiedBonus = v.channelVerified ? 28 : 0;
+      const subBonus = v.subscriberCount ? Math.min(20, Math.log10(Math.max(10, v.subscriberCount)) * 2.6) : 0;
+      const engagementRatio = v.views >= 20 ? Math.min(0.2, v.likes / Math.max(20, v.views)) : 0;
+      const engagementBoost = engagementRatio * 240;
+      const dislikePenalty = (v.dislikes ?? 0) > Math.max(5, v.likes * 0.45) ? -28 : 0;
+      const createdMs = new Date(v.createdAt).getTime();
+      const ageHours = Number.isNaN(createdMs) ? 720 : Math.max(1, (refNowMs - createdMs) / (1e3 * 60 * 60));
+      const velocity = v.views / Math.pow(ageHours + 2, 0.7);
+      const trendingBoost = (v.isLive ? 22 : 0) + Math.min(18, Math.log10(Math.max(1, velocity)) * 3.2) + (v.views >= 1e5 ? 10 : 0);
+      let userBoost = 0;
+      if (userSignals) {
+        if (userSignals.subscribedChannelIds?.has(v.channelId)) userBoost += 24;
+        if (prefLangs.has(v.language.toLowerCase())) userBoost += 14;
+        if (prefCats.has(catLower)) userBoost += 14;
+        let bestInterestScore = 0;
+        for (const [topic, weight] of interestEntries) {
+          const topicNorm = topic.toLowerCase().trim();
+          if (!topicNorm) continue;
+          const exactTopic = catLower === topicNorm || v.tags.some((t) => t.toLowerCase() === topicNorm) || titleLower.includes(topicNorm);
+          if (exactTopic || fullHaystack.includes(topicNorm)) {
+            const candidateBoost = Math.max(0, Math.min(100, weight)) / 100 * (exactTopic ? 26 : 12);
+            if (candidateBoost > bestInterestScore) bestInterestScore = candidateBoost;
+          }
+        }
+        userBoost += bestInterestScore;
+      }
+      const lowViewPenalty = v.views < 500 && !v.channelVerified ? -55 : v.views < 2e3 && !v.channelVerified ? -18 : 0;
+      const lowEngagementPenalty = v.views >= 50 && v.likes === 0 && !v.channelVerified ? -12 : 0;
+      return relevanceScore + viewScore + verifiedBonus + subBonus + engagementBoost + dislikePenalty + trendingBoost + userBoost + lowViewPenalty + lowEngagementPenalty;
     };
     return candidates.sort((a, b) => scoreSearchRelevance(b) - scoreSearchRelevance(a));
   }
   return candidates;
+}
+function isLowQualitySearchQuery(rawQuery) {
+  const q = (rawQuery ?? "").trim();
+  if (q.length < 2 || q.length > 80) return true;
+  if (/^https?:\/\//i.test(q) || /[<>]/.test(q)) return true;
+  if (!/\p{L}/u.test(q)) return true;
+  if (/(.)\1{3,}/u.test(q)) return true;
+  const compact = q.replace(/\s+/g, "").toLowerCase();
+  if (compact.length < 2 || new Set(compact).size < 2) return true;
+  const symbolCount = (q.match(/[^\p{L}\p{N}\s'&-]/gu) ?? []).length;
+  if (symbolCount / q.length > 0.35) return true;
+  const tokens = q.split(/\s+/);
+  if (tokens.some((tok) => /^[bcdfghjklmnpqrstvwxyz]{8,}$/i.test(tok))) return true;
+  return false;
+}
+function rankSearchSuggestions(entries, opts) {
+  const cleanPrefix = (opts?.prefixQuery ?? "").trim().toLowerCase();
+  const nowMs = opts?.nowMs ?? Date.now();
+  const limit = Math.max(1, Math.min(20, opts?.limit ?? 6));
+  const deduped = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    const cleanQ = (entry.query ?? "").trim().replace(/\s+/g, " ");
+    if (isLowQualitySearchQuery(cleanQ)) continue;
+    const key = cleanQ.toLowerCase();
+    if (cleanPrefix && !key.includes(cleanPrefix)) continue;
+    const existing = deduped.get(key);
+    const count = Math.max(1, entry.searchCount ?? 1);
+    const views = Math.max(0, entry.views ?? 0);
+    if (!existing) {
+      deduped.set(key, {
+        id: entry.id,
+        query: cleanQ,
+        previewThumb: entry.previewThumb || "",
+        searchedAt: entry.searchedAt,
+        searchCount: count,
+        views
+      });
+    } else {
+      existing.searchCount += count;
+      existing.views = Math.max(existing.views, views);
+      if (!existing.previewThumb && entry.previewThumb) existing.previewThumb = entry.previewThumb;
+      if (entry.searchedAt && (!existing.searchedAt || entry.searchedAt > existing.searchedAt)) {
+        existing.searchedAt = entry.searchedAt;
+      }
+    }
+  }
+  const interestEntries = Object.entries(opts?.interestScores ?? {});
+  const extraTopics = opts?.interestTopics ?? [];
+  const scored = Array.from(deduped.values()).map((item) => {
+    const qLower = item.query.toLowerCase();
+    let score = 0;
+    if (cleanPrefix) {
+      if (qLower === cleanPrefix) score += 70;
+      else if (qLower.startsWith(cleanPrefix)) score += 45;
+      else score += 20;
+    }
+    score += Math.log2(item.searchCount + 1) * 20;
+    if (item.searchedAt) {
+      const ts = new Date(item.searchedAt).getTime();
+      if (!Number.isNaN(ts)) {
+        const ageHours = Math.max(0, (nowMs - ts) / (1e3 * 60 * 60));
+        score += 34 * Math.exp(-ageHours / (24 * 7));
+      }
+    }
+    let maxInterestBoost = 0;
+    for (const [topic, weight] of interestEntries) {
+      const tNorm = topic.toLowerCase().trim();
+      if (tNorm.length >= 2 && qLower.includes(tNorm)) {
+        maxInterestBoost = Math.max(maxInterestBoost, Math.max(0, Math.min(100, weight)) / 100 * 32);
+      }
+    }
+    for (const topic of extraTopics) {
+      const tNorm = topic.toLowerCase().trim();
+      if (tNorm.length >= 2 && qLower.includes(tNorm)) {
+        maxInterestBoost = Math.max(maxInterestBoost, 18);
+      }
+    }
+    score += maxInterestBoost;
+    if (item.views > 0) {
+      score += Math.min(25, Math.log10(Math.max(10, item.views)) * 3.5);
+    }
+    return { item, score };
+  });
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(({ item }) => ({
+    ...item.id ? { id: item.id } : {},
+    query: item.query,
+    previewThumb: item.previewThumb
+  }));
 }
 function parseIsoDurationToSeconds(iso) {
   if (!iso || typeof iso !== "string") return 0;
@@ -562,6 +684,7 @@ var SCHEMA_SQL = `
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     query TEXT NOT NULL,
     preview_thumb TEXT NOT NULL DEFAULT '',
+    search_count INTEGER NOT NULL DEFAULT 1,
     searched_at TEXT NOT NULL
   );
 
@@ -792,6 +915,10 @@ function applySafeMigrations(target) {
     }
     if (!cols.some((c) => c.name === "birthday")) {
       target.exec(`ALTER TABLE users ADD COLUMN birthday TEXT NOT NULL DEFAULT ''`);
+    }
+    const shCols = target.prepare(`PRAGMA table_info(search_history)`).all();
+    if (shCols.length > 0 && !shCols.some((c) => c.name === "search_count")) {
+      target.exec(`ALTER TABLE search_history ADD COLUMN search_count INTEGER NOT NULL DEFAULT 1`);
     }
   } catch {
   }
@@ -1364,15 +1491,24 @@ function scoreCandidateWithReason(video, ctx, weights = DEFAULT_RANKING_WEIGHTS,
   if (isSubscribed) {
     recommendationReasons.push("Subscribed creator");
   }
+  if (creatorWatches > 0 && !isSubscribed) {
+    recommendationReasons.push(`Because you watched ${video.channelName}`);
+  } else if (ctx.watchedVideoIds.size > 0 && (matchesPreferredCategory || topMatchedTopic)) {
+    recommendationReasons.push(`Because you watched ${topMatchedTopic || video.category}`);
+  }
   if (ctx.personalizationEnabled && (topMatchedTopic || matchesPreferredCategory)) {
     const topicLabel = topMatchedTopic || video.category;
-    recommendationReasons.push(`Matches your interest in ${topicLabel}`);
+    recommendationReasons.push(`Recommended based on your interests (${topicLabel})`);
   }
   if (matchesRecentSearch) {
     recommendationReasons.push("Matches your recent search");
   }
   if (matchesLanguage) {
-    recommendationReasons.push(`In your preferred language (${video.language})`);
+    if (video.views >= 25e3 || video.isLive || ageHours <= 72) {
+      recommendationReasons.push(`Trending in your language (${video.language})`);
+    } else {
+      recommendationReasons.push(`In your preferred language (${video.language})`);
+    }
   }
   if (ageHours <= 72) {
     recommendationReasons.push("Fresh upload");
@@ -1380,14 +1516,14 @@ function scoreCandidateWithReason(video, ctx, weights = DEFAULT_RANKING_WEIGHTS,
   if (video.views >= 1e5 || video.isLive) {
     recommendationReasons.push("Popular in India");
   }
+  if (recommendationReasons.length === 0) {
+    recommendationReasons.push(`Featured in ${video.category}`);
+  }
   return {
     score: Number(Math.max(0, finalScore).toFixed(3)),
     recommendationReasons,
     recommendationReason: recommendationReasons[0]
   };
-}
-function scoreCandidate(video, ctx, weights = DEFAULT_RANKING_WEIGHTS, nowMs = Date.now()) {
-  return scoreCandidateWithReason(video, ctx, weights, nowMs).score;
 }
 function normalizeTitlePrefix(title) {
   if (!title) return "";
@@ -1465,6 +1601,47 @@ function generatePersonalizedRecommendations(candidates, ctx, opts) {
     total: diversified.length
   };
 }
+var RELATED_STOP_WORDS = /* @__PURE__ */ new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "that",
+  "this",
+  "your",
+  "into",
+  "about",
+  "what",
+  "when",
+  "how",
+  "why",
+  "who",
+  "all",
+  "best",
+  "top",
+  "new",
+  "full",
+  "video",
+  "videos",
+  "official",
+  "live",
+  "hindi",
+  "english",
+  "india",
+  "indian",
+  "latest",
+  "episode",
+  "part",
+  "shorts"
+]);
+function extractSignificantTerms(text) {
+  return Array.from(
+    new Set(
+      (text || "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 3 && !RELATED_STOP_WORDS.has(w) && !/^\d+$/.test(w))
+    )
+  );
+}
 function rankTrendingIndia(candidates, ctx, nowMs = Date.now()) {
   const valid = candidates.filter((c) => validateContentCandidate(c, ctx).valid);
   return [...valid].sort((a, b) => {
@@ -1476,27 +1653,69 @@ function rankTrendingIndia(candidates, ctx, nowMs = Date.now()) {
       return (Math.log10(Math.max(10, v.views)) * 15 + Math.log10(Math.max(1, velocity)) * 20 + engagement * 40) * spamDampener;
     };
     return score(b) - score(a);
+  }).map((v) => {
+    const reason = `Trending in ${v.language || "India"}`;
+    return {
+      ...v,
+      recommendationReasons: [reason, `Popular in ${v.category}`],
+      recommendationReason: reason
+    };
   });
 }
 function rankRelatedVideos(currentVideo, candidates, ctx) {
   const valid = candidates.filter(
     (c) => c.id !== currentVideo.id && !c.isShort && validateContentCandidate(c, ctx.validation).valid
   );
-  const currentTags = new Set(currentVideo.tags.map((t) => t.toLowerCase()));
-  const sorted = [...valid].sort((a, b) => {
-    const simScore = (v) => {
-      let s = scoreCandidate(v, ctx) * 0.4;
-      if (v.category === currentVideo.category) s += 35;
-      if (v.language === currentVideo.language) s += 18;
-      if (v.channelId === currentVideo.channelId) s += 12;
-      for (const tag of v.tags) {
-        if (currentTags.has(tag.toLowerCase())) s += 12;
-      }
-      return s;
-    };
-    return simScore(b) - simScore(a);
+  const seenIds = /* @__PURE__ */ new Set();
+  const unique = valid.filter((c) => {
+    if (seenIds.has(c.id)) return false;
+    seenIds.add(c.id);
+    return true;
   });
-  return diversifyFeed(sorted, 2, 3);
+  const currentTags = new Set(currentVideo.tags.map((t) => t.toLowerCase()));
+  const currentTitleTerms = extractSignificantTerms(currentVideo.title);
+  const currentTitleSet = new Set(currentTitleTerms);
+  const shortSourceTitle = currentVideo.title.length > 42 ? `${currentVideo.title.slice(0, 39).trim()}...` : currentVideo.title;
+  const scored = unique.map((v) => {
+    const base = scoreCandidateWithReason(v, ctx);
+    const candTerms = extractSignificantTerms(`${v.title} ${v.tags.join(" ")}`);
+    let titleMatchCount = 0;
+    for (const term of candTerms) {
+      if (currentTitleSet.has(term)) titleMatchCount += 1;
+    }
+    let tagMatchCount = 0;
+    for (const tag of v.tags) {
+      if (currentTags.has(tag.toLowerCase())) tagMatchCount += 1;
+    }
+    const sameCategory = v.category === currentVideo.category;
+    const sameLanguage = v.language === currentVideo.language;
+    const sameCreator = v.channelId === currentVideo.channelId;
+    const engagementRatio = v.views >= 20 ? Math.min(0.18, v.likes / Math.max(20, v.views)) : 0;
+    const qualityBonus = Math.log10(Math.max(10, v.views)) * 2.4 + (v.channelVerified ? 6 : 0) + engagementRatio * 45;
+    const simScore = base.score * 0.45 + Math.min(64, titleMatchCount * 20) + Math.min(36, tagMatchCount * 12) + (sameCategory ? 32 : 0) + (sameLanguage ? 16 : 0) + (sameCreator ? 14 : 0) + qualityBonus;
+    const reasons = [];
+    if (titleMatchCount > 0 || tagMatchCount > 0) {
+      reasons.push(`Because you watched "${shortSourceTitle}"`);
+    }
+    if (sameCreator) {
+      reasons.push(`More from ${currentVideo.channelName}`);
+    }
+    if (sameCategory && sameLanguage) {
+      reasons.push(`Similar ${v.category} in ${v.language}`);
+    } else if (sameCategory) {
+      reasons.push(`Similar in ${v.category}`);
+    }
+    for (const r of base.recommendationReasons) {
+      if (!reasons.includes(r)) reasons.push(r);
+    }
+    return {
+      ...v,
+      _simScore: simScore,
+      recommendationReasons: reasons,
+      recommendationReason: reasons[0]
+    };
+  }).sort((a, b) => b._simScore - a._simScore);
+  return diversifyFeed(scored, 2, 3).map(({ _simScore: _unused, ...rest }) => rest);
 }
 function rankShortsFeed(candidates, ctx, nowMs = Date.now(), opts) {
   const mode = opts?.mode ?? "for_you";
@@ -1901,7 +2120,7 @@ function toCandidate(item) {
     ...item,
     status: "status" in item ? item.status : "published",
     visibility: "visibility" in item ? item.visibility : "public",
-    dislikes: "dislikes" in item ? item.dislikes : 0
+    dislikes: "dislikes" in item ? item.dislikes ?? 0 : 0
   };
 }
 function recordBehaviorEvent(params) {
@@ -1979,14 +2198,26 @@ function recordBehaviorEventBatch(events) {
 }
 function getRelatedCandidatePool(currentVideo, ctx, extraExternal = []) {
   const native = getAllNativeCandidates();
+  const sameCategoryExtRows = db.prepare(`
+      SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
+             c.verified as channel_verified, c.subscriber_count
+      FROM videos v JOIN channels c ON c.id = v.channel_id
+      WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'external' AND v.is_short = 0 AND v.category = ?
+      ORDER BY v.views DESC LIMIT 20
+    `).all(currentVideo.category);
   const cachedExtRows = db.prepare(`
       SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
              c.verified as channel_verified, c.subscriber_count
       FROM videos v JOIN channels c ON c.id = v.channel_id
       WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'external' AND v.is_short = 0
-      ORDER BY v.views DESC LIMIT 20
+      ORDER BY v.views DESC LIMIT 25
     `).all();
-  const pool = [...extraExternal.map(toCandidate), ...native, ...cachedExtRows.map(hydrateVideoRow).map(toCandidate)];
+  const pool = [
+    ...extraExternal.map(toCandidate),
+    ...sameCategoryExtRows.map(hydrateVideoRow).map(toCandidate),
+    ...native,
+    ...cachedExtRows.map(hydrateVideoRow).map(toCandidate)
+  ];
   return rankRelatedVideos(currentVideo, pool, ctx);
 }
 
@@ -3427,7 +3658,11 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
         `).all(req.auth.userId);
       const hydrated = subRows.map(hydrateVideoRow).filter((v) => shorts === "1" ? v.isShort : !v.isShort);
       const filtered = filterAndSortVideos(hydrated, { category, language });
-      const valid = filtered.map(toCandidate).filter((v) => validateContentCandidate(v, ctx.validation).valid);
+      const valid = filtered.map(toCandidate).filter((v) => validateContentCandidate(v, ctx.validation).valid).map((v) => ({
+        ...v,
+        recommendationReasons: ["Subscribed creator", `In ${v.language}`],
+        recommendationReason: "Subscribed creator"
+      }));
       const slice = valid.slice(cursor, cursor + limit);
       const nextCursor = cursor + slice.length < valid.length ? cursor + slice.length : null;
       res.json({
@@ -3612,6 +3847,23 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
     if (!current) {
       res.json({ videos: [] });
       return;
+    }
+    if (extRelated.length < 4) {
+      const topicWords = current.title.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 3).slice(0, 4).join(" ");
+      const fallbackTopic = topicWords || current.tags[0] || current.category;
+      if (fallbackTopic) {
+        try {
+          const extra = await fetchExternalDiscovery(fallbackTopic, current.language);
+          const seenExt = new Set(extRelated.map((r) => r.id));
+          for (const item of extra) {
+            if (item.id !== current.id && !item.isShort && !seenExt.has(item.id)) {
+              extRelated.push(item);
+              seenExt.add(item.id);
+            }
+          }
+        } catch {
+        }
+      }
     }
     const ranked = getRelatedCandidatePool(current, ctx, extRelated);
     res.json({ videos: ranked.slice(0, 16) });
@@ -5277,16 +5529,25 @@ app.get("/api/videos/:id", asyncRoute2(async (req, res) => {
       }
     }
   }
-  const relatedRows = db.prepare(`
-    SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
-           c.verified as channel_verified, c.subscriber_count
-    FROM videos v
-    JOIN channels c ON c.id = v.channel_id
-    WHERE v.id != ? AND v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'native' AND v.is_short = 0
-    ORDER BY (CASE WHEN v.category = ? THEN 1 ELSE 0 END) DESC, v.views DESC
-    LIMIT 8
-  `).all(id, videoData.category);
-  const combinedRelated = [...extRelated, ...relatedRows.map(hydrateVideoRow)].slice(0, 14);
+  if (extRelated.length < 4 && !videoData.isShort) {
+    const topicWords = videoData.title.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((w) => w.length >= 3).slice(0, 4).join(" ");
+    const fallbackTopic = topicWords || videoData.tags?.[0] || videoData.category;
+    if (fallbackTopic) {
+      try {
+        const extra = await fetchExternalDiscovery(fallbackTopic, videoData.language);
+        const seenExt = new Set(extRelated.map((r) => r.id));
+        for (const item of extra) {
+          if (item.id !== videoData.id && !item.isShort && !seenExt.has(item.id)) {
+            extRelated.push(item);
+            seenExt.add(item.id);
+          }
+        }
+      } catch {
+      }
+    }
+  }
+  const aiCtx = buildUserAiContext(req.auth?.userId);
+  const combinedRelated = getRelatedCandidatePool(toCandidate(videoData), aiCtx, extRelated).slice(0, 14);
   res.json({
     video: {
       ...videoData,
@@ -5461,6 +5722,49 @@ app.delete("/api/videos/:id", requireAuth, (req, res) => {
   logAudit(req.auth.userId, "VIDEO_DELETE", "video", videoId);
   res.json({ ok: true });
 });
+var lastSearchPruneMs = 0;
+function pruneDeadSearchTerms(userId) {
+  const nowMs = Date.now();
+  const shouldGlobalPrune = nowMs - lastSearchPruneMs > 15 * 60 * 1e3;
+  if (!shouldGlobalPrune && !userId) return;
+  try {
+    if (shouldGlobalPrune) {
+      lastSearchPruneMs = nowMs;
+      const staleCutoffIso = new Date(nowMs - 60 * 24 * 60 * 60 * 1e3).toISOString();
+      db.prepare(`DELETE FROM search_history WHERE searched_at < ? AND COALESCE(search_count, 1) <= 1`).run(
+        staleCutoffIso
+      );
+      const recentRows = db.prepare(`SELECT id, query FROM search_history ORDER BY searched_at DESC LIMIT 200`).all();
+      for (const row of recentRows) {
+        if (isLowQualitySearchQuery(row.query)) {
+          db.prepare(`DELETE FROM search_history WHERE id = ?`).run(row.id);
+        }
+      }
+    }
+    if (userId) {
+      const userRows = db.prepare(`
+          SELECT id, query
+          FROM search_history
+          WHERE user_id = ?
+          ORDER BY searched_at DESC, COALESCE(search_count, 1) DESC
+        `).all(userId);
+      const badIds = [];
+      let keptCount = 0;
+      for (const row of userRows) {
+        if (isLowQualitySearchQuery(row.query)) {
+          badIds.push(row.id);
+        } else {
+          keptCount += 1;
+          if (keptCount > 40) badIds.push(row.id);
+        }
+      }
+      for (const badId of badIds) {
+        db.prepare(`DELETE FROM search_history WHERE id = ?`).run(badId);
+      }
+    }
+  } catch {
+  }
+}
 app.get("/api/search", asyncRoute2(async (req, res) => {
   const {
     q = "",
@@ -5473,6 +5777,13 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
   } = req.query;
   const cleanToken = (pageToken || "").trim();
   const validUploadDate = ["any", "today", "week", "month"].includes(uploadDate) ? uploadDate : "any";
+  const ctx = buildUserAiContext(req.auth?.userId);
+  const userSignals = req.auth ? {
+    preferredLanguages: ctx.preferredLanguages,
+    preferredCategories: ctx.preferredCategories,
+    interestScores: ctx.interestScores,
+    subscribedChannelIds: ctx.subscribedChannelIds
+  } : void 0;
   let nativeMatches = [];
   let channelMatches = [];
   if (!cleanToken) {
@@ -5483,14 +5794,15 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
       JOIN channels c ON c.id = v.channel_id
       WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'native'
     `).all();
-    const hydrated = rows.map(hydrateVideoRow);
+    const hydrated = rows.map(hydrateVideoRow).filter((v) => validateContentCandidate(toCandidate(v), ctx.validation).valid);
     nativeMatches = filterAndSortVideos(hydrated, {
       query: q,
       category,
       language,
       sort,
       duration,
-      uploadDate: validUploadDate
+      uploadDate: validUploadDate,
+      userSignals
     });
     channelMatches = q.trim() ? db.prepare(`
           SELECT id, name, handle, description, avatar_url as avatarUrl, verified, subscriber_count as subscriberCount
@@ -5500,22 +5812,26 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
         `).all(`%${q.trim().toLowerCase()}%`, `%${q.trim().toLowerCase()}%`) : [];
   }
   const extPaged = q.trim() ? await fetchExternalDiscoveryPaged(q, language, cleanToken) : await fetchExternalFeedPaged({ category, language, pageToken: cleanToken });
+  const validExtItems = extPaged.items.filter(
+    (v) => validateContentCandidate(toCandidate(v), ctx.validation).valid
+  );
   const searchOpts = {
     query: q.trim() ? q : void 0,
     category,
     language,
     duration,
     uploadDate: validUploadDate,
-    sort
+    sort,
+    userSignals
   };
-  let externalMatches = filterAndSortVideos(extPaged.items, {
+  const externalMatches = filterAndSortVideos(validExtItems, {
     ...searchOpts,
     suppressLowViewSpam: true,
     minTermMatchRatio: 1
   });
   let usedRelaxed = false;
   if (q.trim() && externalMatches.length < 4) {
-    const ytOnly = extPaged.items.filter((v) => v.id.startsWith("ext_"));
+    const ytOnly = validExtItems.filter((v) => v.id.startsWith("ext_"));
     const relaxedExt = filterAndSortVideos(ytOnly, {
       ...searchOpts,
       suppressLowViewSpam: true,
@@ -5549,19 +5865,25 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
     mergedChannels.push(ch);
     if (mergedChannels.length >= 6) break;
   }
-  if (!cleanToken && req.auth && q.trim().length >= 2) {
+  const cleanQ = q.trim().replace(/\s+/g, " ");
+  if (!cleanToken && req.auth && cleanQ.length >= 2 && !isLowQualitySearchQuery(cleanQ)) {
     const uid = req.auth.userId;
     const userPref = db.prepare("SELECT history_paused FROM users WHERE id = ?").get(uid);
     if (userPref && userPref.history_paused === 0) {
       const topThumb = combined[0]?.thumbnailUrl ?? "";
-      db.prepare("DELETE FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)").run(uid, q.trim());
-      db.prepare("INSERT INTO search_history (id, user_id, query, preview_thumb, searched_at) VALUES (?, ?, ?, ?, ?)").run(
-        `sh_${randomUUID4().slice(0, 8)}`,
-        uid,
-        q.trim(),
-        topThumb,
-        (/* @__PURE__ */ new Date()).toISOString()
-      );
+      const existingHist = db.prepare("SELECT id, search_count FROM search_history WHERE user_id = ? AND LOWER(query) = LOWER(?)").get(uid, cleanQ);
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      if (existingHist) {
+        db.prepare(`
+          UPDATE search_history
+          SET query = ?, preview_thumb = COALESCE(NULLIF(?, ''), preview_thumb), search_count = COALESCE(search_count, 1) + 1, searched_at = ?
+          WHERE id = ?
+        `).run(cleanQ, topThumb, nowIso, existingHist.id);
+      } else {
+        db.prepare(
+          "INSERT INTO search_history (id, user_id, query, preview_thumb, search_count, searched_at) VALUES (?, ?, ?, ?, 1, ?)"
+        ).run(`sh_${randomUUID4().slice(0, 8)}`, uid, cleanQ, topThumb, nowIso);
+      }
     }
   }
   res.json({
@@ -5574,29 +5896,43 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
 }));
 app.get("/api/search/suggestions", (req, res) => {
   const q = String(req.query.q ?? "").trim().toLowerCase();
-  const historyRows = req.auth ? db.prepare(`
-        SELECT id, query, preview_thumb as previewThumb, searched_at as searchedAt
+  pruneDeadSearchTerms(req.auth?.userId);
+  const ctx = buildUserAiContext(req.auth?.userId);
+  const rawHistoryRows = req.auth ? db.prepare(`
+        SELECT id, query, preview_thumb as previewThumb, COALESCE(search_count, 1) as searchCount, searched_at as searchedAt
         FROM search_history
         WHERE user_id = ? AND (? = '' OR LOWER(query) LIKE ?)
         ORDER BY searched_at DESC
-        LIMIT 6
+        LIMIT 30
       `).all(req.auth.userId, q, `%${q}%`) : [];
+  const rankedHistory = rankSearchSuggestions(rawHistoryRows, {
+    prefixQuery: q,
+    interestScores: ctx.interestScores,
+    interestTopics: ctx.selectedInterests,
+    limit: 6
+  });
   const videoSuggestions = q ? db.prepare(`
-        SELECT title, thumbnail_url as previewThumb
+        SELECT title as query, thumbnail_url as previewThumb, views, created_at as searchedAt
         FROM videos
-        WHERE visibility = 'public' AND status = 'published' AND (LOWER(title) LIKE ? OR LOWER(tags_json) LIKE ?)
+        WHERE visibility = 'public' AND status = 'published' AND views >= 100 AND (LOWER(title) LIKE ? OR LOWER(tags_json) LIKE ?)
         ORDER BY views DESC
-        LIMIT 6
+        LIMIT 25
       `).all(`%${q}%`, `%${q}%`) : db.prepare(`
-        SELECT title, thumbnail_url as previewThumb
+        SELECT title as query, thumbnail_url as previewThumb, views, created_at as searchedAt
         FROM videos
-        WHERE visibility = 'public' AND status = 'published'
+        WHERE visibility = 'public' AND status = 'published' AND views >= 500
         ORDER BY views DESC
-        LIMIT 5
+        LIMIT 25
       `).all();
+  const rankedSuggestions = rankSearchSuggestions(videoSuggestions, {
+    prefixQuery: q,
+    interestScores: ctx.interestScores,
+    interestTopics: ctx.selectedInterests,
+    limit: 6
+  });
   res.json({
-    history: historyRows,
-    suggestions: videoSuggestions.map((v) => ({ query: v.title, previewThumb: v.previewThumb }))
+    history: rankedHistory,
+    suggestions: rankedSuggestions
   });
 });
 app.get("/api/search/history", requireAuth, (req, res) => {

@@ -63,12 +63,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
 
+  const onBehaviorEventRef = useRef(onBehaviorEvent);
+  const onProgressSaveRef = useRef(onProgressSave);
+
+  useEffect(() => {
+    onBehaviorEventRef.current = onBehaviorEvent;
+  }, [onBehaviorEvent]);
+
+  useEffect(() => {
+    onProgressSaveRef.current = onProgressSave;
+  }, [onProgressSave]);
+
   const isExternalEmbed = video.sourceType === 'external' && Boolean(video.externalEmbedUrl);
 
   useEffect(() => {
     firedMilestonesRef.current = new Set();
     endedOnceRef.current = false;
-    onBehaviorEvent?.('start', 0, 0);
+    onBehaviorEventRef.current?.('start', 0, 0);
   }, [video.id]);
 
   useEffect(() => {
@@ -154,15 +165,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   });
 
   useEffect(() => {
-    if (isExternalEmbed || !onProgressSave) return;
+    if (isExternalEmbed) return;
     const interval = setInterval(() => {
       const el = videoRef.current;
       if (el && !el.paused && el.currentTime > 1) {
-        onProgressSave(Math.floor(el.currentTime));
+        onProgressSaveRef.current?.(Math.floor(el.currentTime));
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [isExternalEmbed, onProgressSave]);
+  }, [isExternalEmbed]);
 
   if (isExternalEmbed && video.externalEmbedUrl) {
     return (

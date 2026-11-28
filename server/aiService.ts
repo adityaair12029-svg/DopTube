@@ -311,7 +311,7 @@ export function toCandidate(item: HydratedVideoRow | DiscoveryResult): Candidate
     ...item,
     status: 'status' in item ? item.status : 'published',
     visibility: 'visibility' in item ? item.visibility : 'public',
-    dislikes: 'dislikes' in item ? item.dislikes : 0,
+    dislikes: 'dislikes' in item ? (item.dislikes ?? 0) : 0,
   };
 }
 
@@ -428,15 +428,29 @@ export function recordBehaviorEventBatch(events: BehaviorEventInput[]) {
 
 export function getRelatedCandidatePool(currentVideo: CandidateVideo, ctx: UserAiContext, extraExternal: DiscoveryResult[] = []): CandidateVideo[] {
   const native = getAllNativeCandidates();
+  const sameCategoryExtRows = db
+    .prepare(`
+      SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
+             c.verified as channel_verified, c.subscriber_count
+      FROM videos v JOIN channels c ON c.id = v.channel_id
+      WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'external' AND v.is_short = 0 AND v.category = ?
+      ORDER BY v.views DESC LIMIT 20
+    `)
+    .all(currentVideo.category) as unknown as VideoDbRow[];
   const cachedExtRows = db
     .prepare(`
       SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
              c.verified as channel_verified, c.subscriber_count
       FROM videos v JOIN channels c ON c.id = v.channel_id
       WHERE v.visibility = 'public' AND v.status = 'published' AND v.source_type = 'external' AND v.is_short = 0
-      ORDER BY v.views DESC LIMIT 20
+      ORDER BY v.views DESC LIMIT 25
     `)
     .all() as unknown as VideoDbRow[];
-  const pool = [...extraExternal.map(toCandidate), ...native, ...cachedExtRows.map(hydrateVideoRow).map(toCandidate)];
+  const pool = [
+    ...extraExternal.map(toCandidate),
+    ...sameCategoryExtRows.map(hydrateVideoRow).map(toCandidate),
+    ...native,
+    ...cachedExtRows.map(hydrateVideoRow).map(toCandidate),
+  ];
   return rankRelatedVideos(currentVideo, pool, ctx);
 }

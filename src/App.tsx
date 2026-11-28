@@ -596,7 +596,7 @@ export default function App() {
     handleWatch(playlist.videos[0].id);
   };
 
-  const handleToggleAutoplay = async () => {
+  const handleToggleAutoplay = useCallback(async () => {
     const next = !autoplayEnabled;
     setAutoplayEnabled(next);
     if (user) {
@@ -606,7 +606,18 @@ export default function App() {
       }).catch(() => {});
     }
     showToast(next ? 'Autoplay enabled' : 'Autoplay paused');
-  };
+  }, [autoplayEnabled, user, showToast]);
+
+  const handleOpenChannel = useCallback((id: string) => navigateTo('channel', id), [navigateTo]);
+  const handleRedirectToShort = useCallback((v: VideoItem) => openShort(v.id, v), [openShort]);
+  const handleOpenAuth = useCallback(() => setAuthOpen(true), []);
+  const handleMinimizeWatch = useCallback(
+    (v: VideoItem) => {
+      setMiniPlayerVideo(v);
+      navigateTo('home');
+    },
+    [navigateTo]
+  );
 
   const handlePlayMusicTrack = (track: MusicTrack, list: MusicTrack[]) => {
     setMiniPlayerVideo(null);
@@ -803,19 +814,16 @@ export default function App() {
             activePlaylistId={activePlaylistId}
             queue={queue}
             onToggleAutoplay={handleToggleAutoplay}
-            onChangeAutoplayMode={(mode) => setAutoplayMode(mode)}
+            onChangeAutoplayMode={setAutoplayMode}
             onQueueChanged={loadQueue}
             onWatch={handleWatch}
-            onRedirectToShort={(v) => openShort(v.id, v)}
-            onOpenChannel={(id) => navigateTo('channel', id)}
-            onOpenAuth={() => setAuthOpen(true)}
+            onRedirectToShort={handleRedirectToShort}
+            onOpenChannel={handleOpenChannel}
+            onOpenAuth={handleOpenAuth}
             onSavePlaylist={handleSavePlaylist}
-            onShare={(v) => setShareVideo(v)}
-            onReport={(v) => setReportVideo(v)}
-            onMinimize={(v) => {
-              setMiniPlayerVideo(v);
-              navigateTo('home');
-            }}
+            onShare={setShareVideo}
+            onReport={setReportVideo}
+            onMinimize={handleMinimizeWatch}
             onToast={showToast}
             onSubscriptionsChanged={loadUserContext}
             onVideoLoaded={setActiveWatchVideo}

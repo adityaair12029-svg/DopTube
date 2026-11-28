@@ -16,6 +16,8 @@ import {
   validateCopyrightClaim,
   dedupeById,
   buildUsernameSuggestions,
+  isLowQualitySearchQuery,
+  rankSearchSuggestions,
   type RankableVideo,
 } from './domain';
 import { computeViewsLast30Days, diversifyFeed, scoreCandidate, type CandidateVideo, type UserAiContext } from './recommendation';
@@ -685,5 +687,94 @@ test('parseYouTubeSearchHtml parses Indian grouped views, durations, live badges
   assert.equal(parsed.items[0].channelVerified, true);
   assert.equal(parsed.items[0].category, 'Education');
 });
+
+test('isLowQualitySearchQuery filters junk while rankSearchSuggestions prioritizes frequency, recency, and user interests', () => {
+  assert.equal(isLowQualitySearchQuery('a'), true);
+  assert.equal(isLowQualitySearchQuery('aaaaaaa'), true);
+  assert.equal(isLowQualitySearchQuery('123456'), true);
+  assert.equal(isLowQualitySearchQuery('???!!!'), true);
+  assert.equal(isLowQualitySearchQuery('https://spam.example/x'), true);
+  assert.equal(isLowQualitySearchQuery('qwrtpsdfghjklz'), true);
+  assert.equal(isLowQualitySearchQuery('ai'), false);
+  assert.equal(isLowQualitySearchQuery('Physics JEE'), false);
+
+  const nowMs = new Date('2026-11-28T12:00:00Z').getTime();
+  const ranked = rankSearchSuggestions(
+    [
+      { id: 'bad1', query: 'a', previewThumb: '', searchedAt: '2026-11-28T11:00:00Z', searchCount: 5 },
+      { id: 'bad2', query: 'zzzzzz', previewThumb: '', searchedAt: '2026-11-28T11:00:00Z', searchCount: 5 },
+      { id: 'old_misc', query: 'random cooking video', previewThumb: '', searchedAt: '2026-10-01T10:00:00Z', searchCount: 1 },
+      { id: 'freq_tech', query: 'TypeScript tutorials', previewThumb: '', searchedAt: '2026-11-27T10:00:00Z', searchCount: 6 },
+      { id: 'interest_ai', query: 'AI Agents India', previewThumb: '', searchedAt: '2026-11-28T10:00:00Z', searchCount: 3 },
+    ],
+    {
+      nowMs,
+      interestScores: { AI: 95, TypeScript: 60 },
+      limit: 5,
+    }
+  );
+
+  assert.equal(ranked.some((r) => r.id === 'bad1' || r.id === 'bad2'), false);
+  assert.ok(['interest_ai', 'freq_tech'].includes(ranked[0].id || ''));
+  assert.equal(ranked[ranked.length - 1].id, 'old_misc');
+});
+
+test('filterAndSortVideos boosts higher engagement-to-view ratio, verified status, trending velocity, and user interests', () => {
+  const nowMs = new Date('2026-11-28T12:00:00Z').getTime();
+  const mk = (overrides: Partial<RankableVideo>): RankableVideo => ({
+    id: 'v',
+    title: 'Python Tutorial for Beginners',
+    description: 'Learn python programming step by step',
+    tags: ['python', 'coding'],
+    category: 'Technology',
+    language: 'Hindi',
+    channelId: 'ch1',
+    channelName: 'Code Channel',
+    channelVerified: true,
+    subscriberCount: 100_000,
+    views: 50_000,
+    likes: 500,
+    dislikes: 10,
+    createdAt: '2026-11-27T12:00:00Z',
+    isShort: false,
+    isLive: false,
+    visibility: 'public',
+    durationSec: 900,
+    ...overrides,
+  });
+
+  const lowEngagement = mk({
+    id: 'low_eng',
+    views: 50_000,
+    likes: 150,
+    dislikes: 300,
+    channelVerified: false,
+    createdAt: '2026-10-01T12:00:00Z',
+  });
+  const highEngagementInterest = mk({
+    id: 'high_eng',
+    title: 'Python AI Agents Masterclass',
+    tags: ['python', 'ai', 'technology'],
+    views: 55_000,
+    likes: 5500,
+    dislikes: 15,
+    channelVerified: true,
+    createdAt: '2026-11-28T06:00:00Z',
+  });
+
+  const results = filterAndSortVideos([lowEngagement, highEngagementInterest], {
+    query: 'Python',
+    sort: 'relevance',
+    nowMs,
+    userSignals: {
+      preferredLanguages: ['Hindi'],
+      preferredCategories: ['Technology'],
+      interestScores: { AI: 95, Technology: 85 },
+    },
+  });
+
+  assert.equal(results[0].id, 'high_eng');
+});
+
 
 

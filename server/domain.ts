@@ -50,6 +50,7 @@ export interface RankableVideo {
   subscriberCount?: number;
   views: number;
   likes: number;
+  dislikes?: number;
   createdAt: string;
   isShort: boolean;
   isLive: boolean;
@@ -189,6 +190,13 @@ export function rankVideos<T extends RankableVideo>(
   return [...videos].sort((a, b) => scoreVideoForUser(b, signals, nowMs) - scoreVideoForUser(a, signals, nowMs));
 }
 
+export interface SearchUserSignals {
+  preferredLanguages?: string[];
+  preferredCategories?: string[];
+  interestScores?: Record<string, number>;
+  subscribedChannelIds?: Set<string>;
+}
+
 export interface SearchFilterOptions {
   query?: string;
   category?: string;
@@ -199,6 +207,7 @@ export interface SearchFilterOptions {
   suppressLowViewSpam?: boolean;
   minTermMatchRatio?: number;
   nowMs?: number;
+  userSignals?: SearchUserSignals;
 }
 
 export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: SearchFilterOptions): T[] {
@@ -254,7 +263,7 @@ export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: 
     return true;
   });
 
-  // Suppress 0-499 view unverified spam whenever real popular/verified results exist for the query
+  // Suppress 0-499 view unverified noise whenever real popular/verified results exist for the query
   const shouldSuppressSpam =
     terms.length > 0 &&
     opts.suppressLowViewSpam !== false &&
@@ -280,38 +289,96 @@ export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: 
     return candidates.sort((a, b) => b.views - a.views);
   }
 
-  // Relevance: prioritize exact title/topic matches + high views + verified creators over low-view noise
-  if (terms.length > 0) {
+  // Strict relevance ranking: exact query match + engagement-to-view ratio + verified status + trending + user interests
+  if (terms.length > 0 || opts.userSignals) {
+    const userSignals = opts.userSignals;
+    const prefLangs = new Set((userSignals?.preferredLanguages ?? []).map((l) => l.toLowerCase()));
+    const prefCats = new Set((userSignals?.preferredCategories ?? []).map((c) => c.toLowerCase()));
+    const interestEntries = Object.entries(userSignals?.interestScores ?? {});
+
     const scoreSearchRelevance = (v: T): number => {
       const titleLower = v.title.toLowerCase();
       const tagsLower = v.tags.join(' ').toLowerCase();
       const catLower = v.category.toLowerCase();
       const channelLower = (v.channelName ?? '').toLowerCase();
+      const fullHaystack = `${titleLower} ${tagsLower} ${catLower} ${v.description.toLowerCase()}`;
 
-      const exactTitlePhrase = q.length >= 2 && titleLower.includes(q) ? 55 : 0;
-      const exactChannelPhrase = q.length >= 2 && channelLower.includes(q) ? 28 : 0;
-      const termScore = terms.reduce((acc, t) => {
-        if (titleLower.includes(t)) return acc + 28;
-        if (tagsLower.includes(t) || catLower.includes(t)) return acc + 12;
-        if (channelLower.includes(t)) return acc + 8;
-        return acc + 2;
-      }, 0);
-      const allInTitleBonus = terms.every((t) => titleLower.includes(t)) ? 30 : 0;
+      let relevanceScore = 0;
+      if (terms.length > 0) {
+        const exactTitlePhrase = q.length >= 2 && titleLower.includes(q) ? 55 : 0;
+        const exactChannelPhrase = q.length >= 2 && channelLower.includes(q) ? 28 : 0;
+        const termScore = terms.reduce((acc, t) => {
+          if (titleLower.includes(t)) return acc + 28;
+          if (tagsLower.includes(t) || catLower.includes(t)) return acc + 12;
+          if (channelLower.includes(t)) return acc + 8;
+          return acc + 2;
+        }, 0);
+        const allInTitleBonus = terms.every((t) => titleLower.includes(t)) ? 30 : 0;
+        relevanceScore = exactTitlePhrase + exactChannelPhrase + termScore + allInTitleBonus;
+      }
+
+      // Popularity & Verified Status
       const viewScore = Math.log10(Math.max(10, v.views)) * 12;
-      const verifiedBonus = v.channelVerified ? 22 : 0;
-      const subBonus = v.subscriberCount ? Math.min(18, Math.log10(Math.max(10, v.subscriberCount)) * 2.5) : 0;
+      const verifiedBonus = v.channelVerified ? 28 : 0;
+      const subBonus = v.subscriberCount ? Math.min(20, Math.log10(Math.max(10, v.subscriberCount)) * 2.6) : 0;
+
+      // Engagement-to-View Ratio + Dislike Dampening
+      const engagementRatio = v.views >= 20 ? Math.min(0.2, v.likes / Math.max(20, v.views)) : 0;
+      const engagementBoost = engagementRatio * 240;
+      const dislikePenalty = (v.dislikes ?? 0) > Math.max(5, v.likes * 0.45) ? -28 : 0;
+
+      // Trending Velocity Boost
+      const createdMs = new Date(v.createdAt).getTime();
+      const ageHours = Number.isNaN(createdMs) ? 720 : Math.max(1, (refNowMs - createdMs) / (1000 * 60 * 60));
+      const velocity = v.views / Math.pow(ageHours + 2, 0.7);
+      const trendingBoost =
+        (v.isLive ? 22 : 0) +
+        Math.min(18, Math.log10(Math.max(1, velocity)) * 3.2) +
+        (v.views >= 100_000 ? 10 : 0);
+
+      // Exact User Interest, Category & Language Boost
+      let userBoost = 0;
+      if (userSignals) {
+        if (userSignals.subscribedChannelIds?.has(v.channelId)) userBoost += 24;
+        if (prefLangs.has(v.language.toLowerCase())) userBoost += 14;
+        if (prefCats.has(catLower)) userBoost += 14;
+
+        let bestInterestScore = 0;
+        for (const [topic, weight] of interestEntries) {
+          const topicNorm = topic.toLowerCase().trim();
+          if (!topicNorm) continue;
+          const exactTopic =
+            catLower === topicNorm ||
+            v.tags.some((t) => t.toLowerCase() === topicNorm) ||
+            titleLower.includes(topicNorm);
+          if (exactTopic || fullHaystack.includes(topicNorm)) {
+            const candidateBoost = (Math.max(0, Math.min(100, weight)) / 100) * (exactTopic ? 26 : 12);
+            if (candidateBoost > bestInterestScore) bestInterestScore = candidateBoost;
+          }
+        }
+        userBoost += bestInterestScore;
+      }
+
+      // Suppress low-view / zero-engagement noise
       const lowViewPenalty =
-        v.views < 500 && !v.channelVerified ? -45 : v.views < 2000 && !v.channelVerified ? -15 : 0;
+        v.views < 500 && !v.channelVerified
+          ? -55
+          : v.views < 2000 && !v.channelVerified
+          ? -18
+          : 0;
+      const lowEngagementPenalty = v.views >= 50 && v.likes === 0 && !v.channelVerified ? -12 : 0;
 
       return (
-        exactTitlePhrase +
-        exactChannelPhrase +
-        termScore +
-        allInTitleBonus +
+        relevanceScore +
         viewScore +
         verifiedBonus +
         subBonus +
-        lowViewPenalty
+        engagementBoost +
+        dislikePenalty +
+        trendingBoost +
+        userBoost +
+        lowViewPenalty +
+        lowEngagementPenalty
       );
     };
 
@@ -319,6 +386,148 @@ export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: 
   }
 
   return candidates;
+}
+
+export function isLowQualitySearchQuery(rawQuery: string): boolean {
+  const q = (rawQuery ?? '').trim();
+  if (q.length < 2 || q.length > 80) return true;
+  if (/^https?:\/\//i.test(q) || /[<>]/.test(q)) return true;
+  // Must contain at least one letter (Latin or Unicode Indic scripts)
+  if (!/\p{L}/u.test(q)) return true;
+  // Reject repeated character spam (e.g., "aaaa", "zzzzzz", "hahaaaaa")
+  if (/(.)\1{3,}/u.test(q)) return true;
+  // Reject ultra-repetitive low-entropy queries like "ababab" when >= 4 chars
+  const compact = q.replace(/\s+/g, '').toLowerCase();
+  if (compact.length < 2 || new Set(compact).size < 2) return true;
+  // Reject queries dominated by symbols/punctuation (> 35% non-letter/digit/space)
+  const symbolCount = (q.match(/[^\p{L}\p{N}\s'&-]/gu) ?? []).length;
+  if (symbolCount / q.length > 0.35) return true;
+  // Reject nonsense keyboard-smash tokens (single long token >= 14 chars with no vowels in ASCII)
+  const tokens = q.split(/\s+/);
+  if (tokens.some((tok) => /^[bcdfghjklmnpqrstvwxyz]{8,}$/i.test(tok))) return true;
+  return false;
+}
+
+export interface SearchSuggestionCandidate {
+  id?: string;
+  query: string;
+  previewThumb: string;
+  searchedAt?: string;
+  searchCount?: number;
+  views?: number;
+}
+
+export function rankSearchSuggestions(
+  entries: SearchSuggestionCandidate[],
+  opts?: {
+    prefixQuery?: string;
+    interestTopics?: string[];
+    interestScores?: Record<string, number>;
+    nowMs?: number;
+    limit?: number;
+  }
+): Array<{ id?: string; query: string; previewThumb: string }> {
+  const cleanPrefix = (opts?.prefixQuery ?? '').trim().toLowerCase();
+  const nowMs = opts?.nowMs ?? Date.now();
+  const limit = Math.max(1, Math.min(20, opts?.limit ?? 6));
+
+  const deduped = new Map<
+    string,
+    {
+      id?: string;
+      query: string;
+      previewThumb: string;
+      searchedAt?: string;
+      searchCount: number;
+      views: number;
+    }
+  >();
+
+  for (const entry of entries) {
+    const cleanQ = (entry.query ?? '').trim().replace(/\s+/g, ' ');
+    if (isLowQualitySearchQuery(cleanQ)) continue;
+    const key = cleanQ.toLowerCase();
+    if (cleanPrefix && !key.includes(cleanPrefix)) continue;
+
+    const existing = deduped.get(key);
+    const count = Math.max(1, entry.searchCount ?? 1);
+    const views = Math.max(0, entry.views ?? 0);
+    if (!existing) {
+      deduped.set(key, {
+        id: entry.id,
+        query: cleanQ,
+        previewThumb: entry.previewThumb || '',
+        searchedAt: entry.searchedAt,
+        searchCount: count,
+        views,
+      });
+    } else {
+      existing.searchCount += count;
+      existing.views = Math.max(existing.views, views);
+      if (!existing.previewThumb && entry.previewThumb) existing.previewThumb = entry.previewThumb;
+      if (entry.searchedAt && (!existing.searchedAt || entry.searchedAt > existing.searchedAt)) {
+        existing.searchedAt = entry.searchedAt;
+      }
+    }
+  }
+
+  const interestEntries = Object.entries(opts?.interestScores ?? {});
+  const extraTopics = opts?.interestTopics ?? [];
+
+  const scored = Array.from(deduped.values()).map((item) => {
+    const qLower = item.query.toLowerCase();
+    let score = 0;
+
+    if (cleanPrefix) {
+      if (qLower === cleanPrefix) score += 70;
+      else if (qLower.startsWith(cleanPrefix)) score += 45;
+      else score += 20;
+    }
+
+    // Frequency score (most searched terms float up)
+    score += Math.log2(item.searchCount + 1) * 20;
+
+    // Recency score (exponential decay with ~7-day half-life)
+    if (item.searchedAt) {
+      const ts = new Date(item.searchedAt).getTime();
+      if (!Number.isNaN(ts)) {
+        const ageHours = Math.max(0, (nowMs - ts) / (1000 * 60 * 60));
+        score += 34 * Math.exp(-ageHours / (24 * 7));
+      }
+    }
+
+    // Interest relevance boost
+    let maxInterestBoost = 0;
+    for (const [topic, weight] of interestEntries) {
+      const tNorm = topic.toLowerCase().trim();
+      if (tNorm.length >= 2 && qLower.includes(tNorm)) {
+        maxInterestBoost = Math.max(maxInterestBoost, (Math.max(0, Math.min(100, weight)) / 100) * 32);
+      }
+    }
+    for (const topic of extraTopics) {
+      const tNorm = topic.toLowerCase().trim();
+      if (tNorm.length >= 2 && qLower.includes(tNorm)) {
+        maxInterestBoost = Math.max(maxInterestBoost, 18);
+      }
+    }
+    score += maxInterestBoost;
+
+    // Global popularity signal (if backed by video views)
+    if (item.views > 0) {
+      score += Math.min(25, Math.log10(Math.max(10, item.views)) * 3.5);
+    }
+
+    return { item, score };
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ item }) => ({
+      ...(item.id ? { id: item.id } : {}),
+      query: item.query,
+      previewThumb: item.previewThumb,
+    }));
 }
 
 export function formatViews(views: number): string {
