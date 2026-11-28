@@ -19,7 +19,7 @@ import {
   type RankableVideo,
 } from './domain';
 import { computeViewsLast30Days, diversifyFeed, scoreCandidate, type CandidateVideo, type UserAiContext } from './recommendation';
-import { buildPersonalizedDiscoveryQuery, mapDailymotionItem, parseAtomRssFeed } from './discovery';
+import { buildPersonalizedDiscoveryQuery, mapDailymotionItem, parseAtomRssFeed, parseYouTubeSearchHtml } from './discovery';
 import { createSqlJsCompatDatabase } from './db';
 
 test('password hashing and verification round-trip', () => {
@@ -554,4 +554,136 @@ test('createSqlJsCompatDatabase self-heals cleanly when disk snapshot bytes are 
     }
   }
 });
+
+test('filterAndSortVideos suppresses 10-150 view unverified spam and ranks verified popular creators first', () => {
+  const mk = (overrides: Partial<RankableVideo>): RankableVideo => ({
+    id: 'v',
+    title: 'Physics Lecture',
+    description: 'Science explanation',
+    tags: ['physics'],
+    category: 'Education',
+    language: 'Hindi',
+    channelId: 'ch1',
+    channelName: 'Creator',
+    channelVerified: false,
+    subscriberCount: 100,
+    views: 120,
+    likes: 5,
+    createdAt: '2026-11-26T10:00:00Z',
+    isShort: false,
+    isLive: false,
+    visibility: 'public',
+    durationSec: 600,
+    ...overrides,
+  });
+
+  const pool: RankableVideo[] = [
+    mk({ id: 'spam_120', title: 'Arijit Singh Live Song', views: 120, channelVerified: false, subscriberCount: 40 }),
+    mk({ id: 'spam_90', title: 'Arijit Singh Romantic Songs', views: 90, channelVerified: false, subscriberCount: 15 }),
+    mk({
+      id: 'popular_ver',
+      title: 'Arijit Singh Best Songs Jukebox',
+      views: 3_499_523,
+      channelName: 'Sony Music India',
+      channelVerified: true,
+      subscriberCount: 55_000_000,
+    }),
+    mk({
+      id: 'popular_unver',
+      title: 'Arijit Singh Hit Songs Collection',
+      views: 850_000,
+      channelName: 'Melodies IN',
+      channelVerified: false,
+      subscriberCount: 120_000,
+    }),
+    mk({
+      id: 'popular_tseries',
+      title: 'Tum Hi Ho - Arijit Singh Full Song',
+      views: 45_000_000,
+      channelName: 'T-Series',
+      channelVerified: true,
+      subscriberCount: 270_000_000,
+    }),
+  ];
+
+  const results = filterAndSortVideos(pool, { query: 'Arijit Singh', sort: 'relevance' });
+  assert.equal(results.some((v) => v.id === 'spam_120' || v.id === 'spam_90'), false);
+  assert.equal(results[0].channelVerified, true);
+  assert.ok(results[0].views >= 3_000_000);
+});
+
+test('parseYouTubeSearchHtml parses Indian grouped views, durations, live badges, and channels', () => {
+  const nowMs = new Date('2026-11-28T12:00:00Z').getTime();
+  const sampleData = {
+    contents: {
+      twoColumnSearchResultsRenderer: {
+        primaryContents: {
+          sectionListRenderer: {
+            contents: [
+              {
+                itemSectionRenderer: {
+                  contents: [
+                    {
+                      channelRenderer: {
+                        channelId: 'UCiGyWN6DEbnj2alu7iapuKQ',
+                        title: { simpleText: 'Physics Wallah - Alakh Pandey' },
+                        subscriberCountText: { simpleText: '@PhysicsWallah' },
+                        videoCountText: { simpleText: '1.44\u00a0crore subscribers' },
+                        ownerBadges: [{ metadataBadgeRenderer: { style: 'BADGE_STYLE_TYPE_VERIFIED' } }],
+                        navigationEndpoint: { browseEndpoint: { canonicalBaseUrl: '/@PhysicsWallah' } },
+                        thumbnail: { thumbnails: [{ url: '//yt3.ggpht.com/pw-avatar=s176' }] },
+                        descriptionSnippet: { runs: [{ text: 'Physics for JEE & NEET' }] },
+                      },
+                    },
+                    {
+                      videoRenderer: {
+                        videoId: 'vidReal1234',
+                        title: { runs: [{ text: 'Electromagnetism Complete One Shot' }] },
+                        ownerText: {
+                          runs: [
+                            {
+                              text: 'Physics Wallah - Alakh Pandey',
+                              navigationEndpoint: {
+                                browseEndpoint: {
+                                  browseId: 'UCiGyWN6DEbnj2alu7iapuKQ',
+                                  canonicalBaseUrl: '/@PhysicsWallah',
+                                },
+                              },
+                            },
+                          ],
+                        },
+                        viewCountText: { simpleText: '3,17,46,598 views' },
+                        lengthText: { simpleText: '1:02:10' },
+                        publishedTimeText: { simpleText: '2 yr ago' },
+                        ownerBadges: [{ metadataBadgeRenderer: { style: 'BADGE_STYLE_TYPE_VERIFIED' } }],
+                        thumbnail: { thumbnails: [{ url: 'https://i.ytimg.com/vi/vidReal1234/hq720.jpg' }] },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  const html = `<html><head></head><body><script>var ytInitialData = ${JSON.stringify(sampleData)};</script></body></html>`;
+  const parsed = parseYouTubeSearchHtml(html, { nowMs });
+  assert.equal(parsed.channels.length, 1);
+  assert.equal(parsed.channels[0].id, 'ext_ch_UCiGyWN6DEbnj2alu7iapuKQ');
+  assert.equal(parsed.channels[0].handle, '@PhysicsWallah');
+  assert.equal(parsed.channels[0].subscriberCount, 14_400_000);
+  assert.equal(parsed.channels[0].verified, true);
+  assert.equal(parsed.channels[0].avatarUrl, 'https://yt3.ggpht.com/pw-avatar=s176');
+
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].id, 'ext_vidReal1234');
+  assert.equal(parsed.items[0].views, 31_746_598);
+  assert.equal(parsed.items[0].durationSec, 3730);
+  assert.equal(parsed.items[0].channelVerified, true);
+  assert.equal(parsed.items[0].category, 'Education');
+});
+
 

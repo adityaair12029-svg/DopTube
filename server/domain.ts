@@ -45,6 +45,9 @@ export interface RankableVideo {
   category: string;
   language: string;
   channelId: string;
+  channelName?: string;
+  channelVerified?: boolean;
+  subscriberCount?: number;
   views: number;
   likes: number;
   createdAt: string;
@@ -193,6 +196,8 @@ export interface SearchFilterOptions {
   sort?: 'relevance' | 'date' | 'views';
   duration?: 'all' | 'short' | 'medium' | 'long';
   uploadDate?: 'any' | 'today' | 'week' | 'month';
+  suppressLowViewSpam?: boolean;
+  minTermMatchRatio?: number;
   nowMs?: number;
 }
 
@@ -200,6 +205,7 @@ export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: 
   const q = (opts.query ?? '').trim().toLowerCase();
   const terms = q ? q.split(/\s+/).filter(Boolean) : [];
   const refNowMs = opts.nowMs ?? Date.now();
+  const minMatchRatio = Math.max(0.4, Math.min(1, opts.minTermMatchRatio ?? 1));
 
   const filtered = videos.filter((v) => {
     if (opts.category && opts.category !== 'All') {
@@ -237,30 +243,82 @@ export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: 
     }
 
     if (terms.length > 0) {
-      const text = `${v.title} ${v.description} ${v.category} ${v.language} ${v.tags.join(' ')}`.toLowerCase();
-      return terms.every((t) => text.includes(t));
+      const text = `${v.title} ${v.description} ${v.category} ${v.language} ${v.tags.join(' ')} ${v.channelName ?? ''}`.toLowerCase();
+      if (minMatchRatio >= 1) {
+        return terms.every((t) => text.includes(t));
+      }
+      const matchedCount = terms.filter((t) => text.includes(t)).length;
+      return matchedCount >= Math.ceil(terms.length * minMatchRatio);
     }
 
     return true;
   });
 
+  // Suppress 0-499 view unverified spam whenever real popular/verified results exist for the query
+  const shouldSuppressSpam =
+    terms.length > 0 &&
+    opts.suppressLowViewSpam !== false &&
+    opts.sort !== 'date' &&
+    opts.uploadDate !== 'today';
+
+  let candidates = filtered;
+  if (shouldSuppressSpam) {
+    const isPopularOrVerified = (v: T) =>
+      v.views >= 1000 || Boolean(v.channelVerified) || (v.subscriberCount ?? 0) >= 50_000;
+    const popularCount = filtered.filter(isPopularOrVerified).length;
+    if (popularCount >= 3) {
+      candidates = filtered.filter(
+        (v) => v.views >= 500 || Boolean(v.channelVerified) || (v.subscriberCount ?? 0) >= 50_000
+      );
+    }
+  }
+
   if (opts.sort === 'date') {
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return candidates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
   if (opts.sort === 'views') {
-    return filtered.sort((a, b) => b.views - a.views);
+    return candidates.sort((a, b) => b.views - a.views);
   }
 
-  // Relevance: score title matches higher than description/tag matches
+  // Relevance: prioritize exact title/topic matches + high views + verified creators over low-view noise
   if (terms.length > 0) {
-    return filtered.sort((a, b) => {
-      const scoreTitle = (v: T) =>
-        terms.reduce((acc, t) => acc + (v.title.toLowerCase().includes(t) ? 10 : 1), 0) + Math.log10(Math.max(10, v.views));
-      return scoreTitle(b) - scoreTitle(a);
-    });
+    const scoreSearchRelevance = (v: T): number => {
+      const titleLower = v.title.toLowerCase();
+      const tagsLower = v.tags.join(' ').toLowerCase();
+      const catLower = v.category.toLowerCase();
+      const channelLower = (v.channelName ?? '').toLowerCase();
+
+      const exactTitlePhrase = q.length >= 2 && titleLower.includes(q) ? 55 : 0;
+      const exactChannelPhrase = q.length >= 2 && channelLower.includes(q) ? 28 : 0;
+      const termScore = terms.reduce((acc, t) => {
+        if (titleLower.includes(t)) return acc + 28;
+        if (tagsLower.includes(t) || catLower.includes(t)) return acc + 12;
+        if (channelLower.includes(t)) return acc + 8;
+        return acc + 2;
+      }, 0);
+      const allInTitleBonus = terms.every((t) => titleLower.includes(t)) ? 30 : 0;
+      const viewScore = Math.log10(Math.max(10, v.views)) * 12;
+      const verifiedBonus = v.channelVerified ? 22 : 0;
+      const subBonus = v.subscriberCount ? Math.min(18, Math.log10(Math.max(10, v.subscriberCount)) * 2.5) : 0;
+      const lowViewPenalty =
+        v.views < 500 && !v.channelVerified ? -45 : v.views < 2000 && !v.channelVerified ? -15 : 0;
+
+      return (
+        exactTitlePhrase +
+        exactChannelPhrase +
+        termScore +
+        allInTitleBonus +
+        viewScore +
+        verifiedBonus +
+        subBonus +
+        lowViewPenalty
+      );
+    };
+
+    return candidates.sort((a, b) => scoreSearchRelevance(b) - scoreSearchRelevance(a));
   }
 
-  return filtered;
+  return candidates;
 }
 
 export function formatViews(views: number): string {

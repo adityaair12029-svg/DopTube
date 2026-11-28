@@ -1185,12 +1185,60 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
     ? await fetchExternalDiscoveryPaged(q, language, cleanToken)
     : await fetchExternalFeedPaged({ category, language, pageToken: cleanToken });
 
-  const externalMatches = filterAndSortVideos(extPaged.items, {
+  const searchOpts = {
+    query: q.trim() ? q : undefined,
+    category,
+    language,
     duration: duration as 'all' | 'short' | 'medium' | 'long',
     uploadDate: validUploadDate,
     sort: sort as 'relevance' | 'date' | 'views',
+  };
+
+  let externalMatches = filterAndSortVideos(extPaged.items, {
+    ...searchOpts,
+    suppressLowViewSpam: true,
+    minTermMatchRatio: 1,
   });
-  const combined = [...nativeMatches, ...externalMatches];
+
+  let usedRelaxed = false;
+  if (q.trim() && externalMatches.length < 4) {
+    const ytOnly = extPaged.items.filter((v) => v.id.startsWith('ext_'));
+    const relaxedExt = filterAndSortVideos(ytOnly, {
+      ...searchOpts,
+      suppressLowViewSpam: true,
+      minTermMatchRatio: 0.5,
+    });
+    if (relaxedExt.length > externalMatches.length) {
+      const seenIds = new Set(externalMatches.map((v) => v.id));
+      for (const item of relaxedExt) {
+        if (!seenIds.has(item.id)) {
+          externalMatches.push(item);
+          seenIds.add(item.id);
+        }
+      }
+      usedRelaxed = true;
+    }
+  }
+
+  const combined = filterAndSortVideos([...nativeMatches, ...externalMatches], {
+    ...searchOpts,
+    suppressLowViewSpam: false,
+    minTermMatchRatio: usedRelaxed ? 0.5 : 1,
+  });
+
+  const mergedChannels: Array<{ id: string; subscriberCount?: number; verified?: boolean; [k: string]: unknown }> = [];
+  const seenChannelIds = new Set<string>();
+  const rawChannels = [
+    ...(channelMatches as Array<{ id: string; subscriberCount?: number; verified?: boolean }>),
+    ...(extPaged.channels ?? []),
+  ].sort((a, b) => Number(Boolean(b.verified)) - Number(Boolean(a.verified)) || (b.subscriberCount ?? 0) - (a.subscriberCount ?? 0));
+
+  for (const ch of rawChannels) {
+    if (!ch?.id || seenChannelIds.has(ch.id)) continue;
+    seenChannelIds.add(ch.id);
+    mergedChannels.push(ch);
+    if (mergedChannels.length >= 6) break;
+  }
 
   if (!cleanToken && req.auth && q.trim().length >= 2) {
     const uid = req.auth.userId;
@@ -1210,7 +1258,7 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
 
   res.json({
     videos: combined,
-    channels: channelMatches,
+    channels: mergedChannels,
     nextPageToken: extPaged.nextPageToken,
     hasMore: Boolean(extPaged.nextPageToken),
     discoveryStatus: getDiscoveryStatus(),

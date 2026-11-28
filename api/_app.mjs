@@ -134,6 +134,7 @@ function filterAndSortVideos(videos, opts) {
   const q = (opts.query ?? "").trim().toLowerCase();
   const terms = q ? q.split(/\s+/).filter(Boolean) : [];
   const refNowMs = opts.nowMs ?? Date.now();
+  const minMatchRatio = Math.max(0.4, Math.min(1, opts.minTermMatchRatio ?? 1));
   const filtered = videos.filter((v) => {
     if (opts.category && opts.category !== "All") {
       const catNorm = opts.category.toLowerCase();
@@ -159,24 +160,56 @@ function filterAndSortVideos(videos, opts) {
       }
     }
     if (terms.length > 0) {
-      const text = `${v.title} ${v.description} ${v.category} ${v.language} ${v.tags.join(" ")}`.toLowerCase();
-      return terms.every((t) => text.includes(t));
+      const text = `${v.title} ${v.description} ${v.category} ${v.language} ${v.tags.join(" ")} ${v.channelName ?? ""}`.toLowerCase();
+      if (minMatchRatio >= 1) {
+        return terms.every((t) => text.includes(t));
+      }
+      const matchedCount = terms.filter((t) => text.includes(t)).length;
+      return matchedCount >= Math.ceil(terms.length * minMatchRatio);
     }
     return true;
   });
+  const shouldSuppressSpam = terms.length > 0 && opts.suppressLowViewSpam !== false && opts.sort !== "date" && opts.uploadDate !== "today";
+  let candidates = filtered;
+  if (shouldSuppressSpam) {
+    const isPopularOrVerified = (v) => v.views >= 1e3 || Boolean(v.channelVerified) || (v.subscriberCount ?? 0) >= 5e4;
+    const popularCount = filtered.filter(isPopularOrVerified).length;
+    if (popularCount >= 3) {
+      candidates = filtered.filter(
+        (v) => v.views >= 500 || Boolean(v.channelVerified) || (v.subscriberCount ?? 0) >= 5e4
+      );
+    }
+  }
   if (opts.sort === "date") {
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return candidates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
   if (opts.sort === "views") {
-    return filtered.sort((a, b) => b.views - a.views);
+    return candidates.sort((a, b) => b.views - a.views);
   }
   if (terms.length > 0) {
-    return filtered.sort((a, b) => {
-      const scoreTitle = (v) => terms.reduce((acc, t) => acc + (v.title.toLowerCase().includes(t) ? 10 : 1), 0) + Math.log10(Math.max(10, v.views));
-      return scoreTitle(b) - scoreTitle(a);
-    });
+    const scoreSearchRelevance = (v) => {
+      const titleLower = v.title.toLowerCase();
+      const tagsLower = v.tags.join(" ").toLowerCase();
+      const catLower = v.category.toLowerCase();
+      const channelLower = (v.channelName ?? "").toLowerCase();
+      const exactTitlePhrase = q.length >= 2 && titleLower.includes(q) ? 55 : 0;
+      const exactChannelPhrase = q.length >= 2 && channelLower.includes(q) ? 28 : 0;
+      const termScore = terms.reduce((acc, t) => {
+        if (titleLower.includes(t)) return acc + 28;
+        if (tagsLower.includes(t) || catLower.includes(t)) return acc + 12;
+        if (channelLower.includes(t)) return acc + 8;
+        return acc + 2;
+      }, 0);
+      const allInTitleBonus = terms.every((t) => titleLower.includes(t)) ? 30 : 0;
+      const viewScore = Math.log10(Math.max(10, v.views)) * 12;
+      const verifiedBonus = v.channelVerified ? 22 : 0;
+      const subBonus = v.subscriberCount ? Math.min(18, Math.log10(Math.max(10, v.subscriberCount)) * 2.5) : 0;
+      const lowViewPenalty = v.views < 500 && !v.channelVerified ? -45 : v.views < 2e3 && !v.channelVerified ? -15 : 0;
+      return exactTitlePhrase + exactChannelPhrase + termScore + allInTitleBonus + viewScore + verifiedBonus + subBonus + lowViewPenalty;
+    };
+    return candidates.sort((a, b) => scoreSearchRelevance(b) - scoreSearchRelevance(a));
   }
-  return filtered;
+  return candidates;
 }
 function parseIsoDurationToSeconds(iso) {
   if (!iso || typeof iso !== "string") return 0;
@@ -2151,7 +2184,7 @@ function getDiscoveryStatus() {
   const allKeys = getExternalApiKeys();
   const activeKey = getExternalApiKey();
   const inCooldown = allKeys.length > 0 && !activeKey;
-  const providers = ["dailymotion", "youtube-rss", ...activeKey ? ["youtube-api"] : []];
+  const providers = ["youtube-search", "dailymotion", "youtube-rss", ...activeKey ? ["youtube-api"] : []];
   return {
     configured: true,
     providers,
@@ -2175,6 +2208,7 @@ async function discoveryFetch(url, apiKeyUsed = "", timeoutMs = 6e3) {
   const candidateReferers = Array.from(
     /* @__PURE__ */ new Set([
       getEffectiveReferer(),
+      "https://doptube2.vercel.app/",
       "https://doptube.vercel.app/",
       "https://doobtube.vercel.app/",
       null
@@ -2837,10 +2871,268 @@ async function fetchExternalFeed(params) {
   const res = await fetchExternalFeedPaged(params);
   return res.items;
 }
+function normalizeMediaUrl(url) {
+  const clean = (url || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("//")) return `https:${clean}`;
+  return clean;
+}
+function readYtText(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  const rec = obj;
+  if (typeof rec.simpleText === "string" && rec.simpleText.trim()) return rec.simpleText.trim();
+  if (Array.isArray(rec.runs) && rec.runs.length > 0) {
+    return rec.runs.map((r) => r.text || "").join("").trim();
+  }
+  return "";
+}
+function parseApproximateCount(raw) {
+  const clean = (raw || "").replace(/\u00a0/g, " ").trim();
+  if (!clean) return 0;
+  const croreMatch = clean.match(/([\d.,]+)\s*crores?/i);
+  if (croreMatch) {
+    const val = Number(croreMatch[1].replace(/,/g, ""));
+    return Number.isFinite(val) ? Math.round(val * 1e7) : 0;
+  }
+  const lakhMatch = clean.match(/([\d.,]+)\s*lakhs?/i);
+  if (lakhMatch) {
+    const val = Number(lakhMatch[1].replace(/,/g, ""));
+    return Number.isFinite(val) ? Math.round(val * 1e5) : 0;
+  }
+  const unitMatch = clean.match(/([\d.,]+)\s*([KMB])\b/i);
+  if (unitMatch) {
+    const base = Number(unitMatch[1].replace(/,/g, ""));
+    if (!Number.isFinite(base)) return 0;
+    const unit = unitMatch[2].toUpperCase();
+    const mult = unit === "B" ? 1e9 : unit === "M" ? 1e6 : 1e3;
+    return Math.round(base * mult);
+  }
+  const digits = clean.replace(/[^\d]/g, "");
+  if (!digits) return 0;
+  const num = Number(digits);
+  return Number.isFinite(num) ? num : 0;
+}
+function parseClockDuration(raw) {
+  const clean = (raw || "").trim();
+  if (!clean || !/^\d+(?::\d{1,2}){1,2}$/.test(clean)) return 0;
+  const parts = clean.split(":").map(Number);
+  if (parts.some((n) => !Number.isFinite(n))) return 0;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 0;
+}
+function parseRelativeDateIso(raw, nowMs = Date.now(), fallbackDaysAgo = 30) {
+  const clean = (raw || "").replace(/\u00a0/g, " ").replace(/^streamed\s+/i, "").trim().toLowerCase();
+  const m = clean.match(/(\d+)\s*(sec|second|min|minute|hr|hour|day|wk|week|mo|month|yr|year)s?\s*ago/i);
+  if (!m) {
+    return new Date(nowMs - fallbackDaysAgo * 24 * 60 * 60 * 1e3).toISOString();
+  }
+  const amount = Math.max(1, Number(m[1]) || 1);
+  const unit = m[2].toLowerCase();
+  let ms = 0;
+  if (unit.startsWith("sec")) ms = amount * 1e3;
+  else if (unit.startsWith("min")) ms = amount * 6e4;
+  else if (unit === "hr" || unit.startsWith("hour")) ms = amount * 36e5;
+  else if (unit.startsWith("day")) ms = amount * 864e5;
+  else if (unit === "wk" || unit.startsWith("week")) ms = amount * 7 * 864e5;
+  else if (unit === "mo" || unit.startsWith("month")) ms = amount * 30 * 864e5;
+  else if (unit === "yr" || unit.startsWith("year")) ms = amount * 365 * 864e5;
+  return new Date(nowMs - ms).toISOString();
+}
+function inferCategoryFromText(text) {
+  const t = text.toLowerCase();
+  if (/\b(cricket|ipl|bcci|kohli|rohit|bumrah|wicket|odi|t20|test match)\b/.test(t)) return "Cricket";
+  if (/\b(song|music|album|jukebox|lyrical|lofi|arijit|shreya|concert|acoustic|rap|beats)\b/.test(t)) return "Music";
+  if (/\b(physics|chemistry|maths|biology|jee|neet|upsc|ncert|lecture|tutorial|class 10|class 12|syllabus|electromagnetism|thermodynamics|optics|calculus|algebra)\b/.test(t)) return "Education";
+  if (/\b(space|isro|nasa|quantum|science|experiment|astrophysics|cosmos|rocket)\b/.test(t)) return "Science";
+  if (/\b(tech|coding|javascript|typescript|python|ai|software|laptop|iphone|android|review|programming)\b/.test(t)) return "Technology";
+  if (/\b(gaming|bgmi|valorant|minecraft|gta|esports|gameplay|free fire)\b/.test(t)) return "Gaming";
+  if (/\b(comedy|standup|stand-up|roast|funny|meme|sketch|samay raina|zakir)\b/.test(t)) return "Comedy";
+  if (/\b(recipe|cooking|kitchen|biryani|masala|street food|chef)\b/.test(t)) return "Cooking";
+  if (/\b(news|breaking|headline|budget|election|parliament|live news)\b/.test(t)) return "News";
+  if (/\b(trailer|teaser|movie|cinema|bollywood|film|web series)\b/.test(t)) return "Movies";
+  return "Entertainment";
+}
+function extractEmbeddedJsonObject(html, markerRegex) {
+  const match = markerRegex.exec(html);
+  if (!match) return null;
+  const start = html.indexOf("{", match.index);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+function parseYouTubeSearchHtml(html, opts) {
+  const data = extractEmbeddedJsonObject(
+    html,
+    /(?:var\s+ytInitialData|window\[["']ytInitialData["']\])\s*=/
+  );
+  if (!data) return { items: [], channels: [] };
+  const sections = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents ?? [];
+  const items = [];
+  const channels = [];
+  const seenVideoIds = /* @__PURE__ */ new Set();
+  const seenChannelIds = /* @__PURE__ */ new Set();
+  const nowMs = opts?.nowMs ?? Date.now();
+  for (const sec of sections) {
+    const contents = sec.itemSectionRenderer?.contents ?? [];
+    for (const entry of contents) {
+      if (entry.channelRenderer?.channelId) {
+        const c = entry.channelRenderer;
+        const rawCid = c.channelId;
+        const fullCid = `ext_ch_${rawCid}`;
+        if (seenChannelIds.has(fullCid)) continue;
+        seenChannelIds.add(fullCid);
+        const name = cleanHtmlText(readYtText(c.title)) || "Creator Channel";
+        const subText = readYtText(c.subscriberCountText);
+        const vidCountText = readYtText(c.videoCountText);
+        const canonical = c.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl || "";
+        const handleSource = subText.startsWith("@") ? subText : canonical.startsWith("/@") ? canonical.slice(1) : `@${name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 22) || "creator"}`;
+        const subscriberTextForCount = /subscriber/i.test(vidCountText) ? vidCountText : /subscriber/i.test(subText) ? subText : "";
+        const subscriberCount = parseApproximateCount(subscriberTextForCount);
+        const thumbs = c.thumbnail?.thumbnails ?? [];
+        const avatarUrl = normalizeMediaUrl(thumbs[thumbs.length - 1]?.url || thumbs[0]?.url) || `/api/avatars/${fullCid}.svg`;
+        const verified = Boolean(c.ownerBadges && c.ownerBadges.length > 0) || subscriberCount >= 1e5;
+        channels.push({
+          id: fullCid,
+          userId: `ext_user_${rawCid}`,
+          name,
+          handle: handleSource.startsWith("@") ? handleSource : `@${handleSource}`,
+          description: cleanHtmlText(readYtText(c.descriptionSnippet)),
+          avatarUrl,
+          bannerColor: "#111827",
+          verified,
+          subscriberCount,
+          createdAt: new Date(nowMs).toISOString()
+        });
+      }
+      if (entry.videoRenderer?.videoId) {
+        const v = entry.videoRenderer;
+        const vid = v.videoId;
+        const fullId = `ext_${vid}`;
+        if (seenVideoIds.has(fullId)) continue;
+        seenVideoIds.add(fullId);
+        const title = cleanHtmlText(readYtText(v.title)) || "Featured Video";
+        const ownerRun = v.ownerText?.runs?.[0];
+        const channelName = cleanHtmlText(ownerRun?.text || readYtText(v.ownerText)) || "Creator Channel";
+        const browseId = ownerRun?.navigationEndpoint?.browseEndpoint?.browseId || vid;
+        const canonicalBase = ownerRun?.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl || "";
+        const handle = canonicalBase.startsWith("/@") ? canonicalBase.slice(1) : `@${channelName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 22) || "creator"}`;
+        const viewText = readYtText(v.viewCountText) || readYtText(v.shortViewCountText);
+        const views = parseApproximateCount(viewText);
+        const lengthText = readYtText(v.lengthText);
+        const durationSec = parseClockDuration(lengthText);
+        const isLive = Boolean(
+          v.badges?.some(
+            (b) => b.metadataBadgeRenderer?.style === "BADGE_STYLE_TYPE_LIVE_NOW" || b.metadataBadgeRenderer?.label?.toUpperCase() === "LIVE"
+          )
+        ) || /watching/i.test(viewText);
+        const navUrl = v.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url || "";
+        const isShort = navUrl.includes("/shorts/") || /#shorts?\b/i.test(title) || durationSec > 0 && durationSec <= 62;
+        const pubText = readYtText(v.publishedTimeText);
+        const createdAt = parseRelativeDateIso(pubText, nowMs, isLive ? 0 : 30);
+        const snippet = cleanHtmlText(
+          readYtText(v.detailedMetadataSnippets?.[0]?.snippetText) || readYtText(v.descriptionSnippet)
+        );
+        const category = inferCategoryFromText(`${title} ${channelName} ${snippet}`);
+        const language = opts?.language && opts.language !== "All" ? opts.language : /hindi|हिंदी|हिन्दी|bollywood|bhojpuri|jee|neet|upsc|bharat/i.test(`${title} ${channelName} ${snippet}`) ? "Hindi" : /tamil|தமிழ்/i.test(`${title} ${channelName}`) ? "Tamil" : /telugu|తెలుగు/i.test(`${title} ${channelName}`) ? "Telugu" : "English";
+        const verified = Boolean(v.ownerBadges && v.ownerBadges.length > 0);
+        const thumbs = v.thumbnail?.thumbnails ?? [];
+        const thumbnailUrl = normalizeMediaUrl(thumbs[thumbs.length - 1]?.url || thumbs[0]?.url) || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+        const chThumbs = v.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails ?? [];
+        const channelAvatar = normalizeMediaUrl(chThumbs[chThumbs.length - 1]?.url || chThumbs[0]?.url) || `/api/avatars/ext_ch_${browseId}.svg`;
+        const result = {
+          id: fullId,
+          title,
+          description: snippet.slice(0, 600),
+          tags: [category, language, ...title.toLowerCase().split(/\s+/).filter((w) => w.length >= 3).slice(0, 6)],
+          category,
+          language,
+          channelId: `ext_ch_${browseId}`,
+          channelName,
+          channelHandle: handle,
+          channelAvatar,
+          channelVerified: verified,
+          subscriberCount: verified ? Math.max(25e4, Math.round(views * 0.25)) : Math.max(1e3, Math.round(views * 0.08)),
+          views,
+          likes: Math.round(views * 0.04),
+          createdAt,
+          isShort,
+          isLive,
+          visibility: "public",
+          durationSec: durationSec || (isShort ? 45 : isLive ? 1800 : 480),
+          thumbnailUrl,
+          videoUrl: "",
+          hlsUrl: null,
+          sourceType: "external",
+          externalEmbedUrl: isShort ? `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&playsinline=1&loop=1&playlist=${vid}&rel=0&modestbranding=1&iv_load_policy=3` : `https://www.youtube-nocookie.com/embed/${vid}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3`
+        };
+        setCached(`vid:${fullId}`, result, META_CACHE_TTL_MS);
+        items.push(result);
+      }
+    }
+  }
+  return { items, channels };
+}
+async function fetchYouTubePublicSearch(query, language) {
+  const clean = query.trim();
+  if (!clean) return { items: [], channels: [] };
+  const cacheKey = `yt_pub_search:${clean.toLowerCase()}:${language || "All"}`;
+  const cached = getCached(cacheKey);
+  if (cached) return cached;
+  try {
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(clean)}`;
+    const resp = await fetch(url, {
+      signal: AbortSignal.timeout(5500),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept-Language": "en-IN,en;q=0.9,hi;q=0.8",
+        Accept: "text/html,application/xhtml+xml"
+      }
+    });
+    if (!resp.ok) return { items: [], channels: [] };
+    const html = await resp.text();
+    const parsed = parseYouTubeSearchHtml(html, { language });
+    if (parsed.items.length > 0 || parsed.channels.length > 0) {
+      setCached(cacheKey, parsed, FEED_CACHE_TTL_MS);
+    }
+    return parsed;
+  } catch {
+    return { items: [], channels: [] };
+  }
+}
 async function fetchExternalDiscoveryPaged(query, language, pageToken = "") {
   const cleanQuery = query.trim();
   if (!cleanQuery) {
-    return { items: [], nextPageToken: null };
+    return { items: [], nextPageToken: null, channels: [] };
   }
   const cleanToken = pageToken.trim();
   const cacheKey = `search_unified:${cleanQuery.toLowerCase()}:${language || "All"}:${cleanToken}`;
@@ -2849,6 +3141,7 @@ async function fetchExternalDiscoveryPaged(query, language, pageToken = "") {
   const dmPageMatch = cleanToken.match(/^dm_p(\d+)$/);
   const dmPage = dmPageMatch ? Number(dmPageMatch[1]) : cleanToken === "" ? 1 : 1;
   const fullQuery = language && language !== "All" ? `${cleanQuery} ${language}` : cleanQuery;
+  const queryTerms = cleanQuery.toLowerCase().split(/\s+/).filter(Boolean);
   const apiKey = getExternalApiKey();
   const fetchYtSearch = async () => {
     if (!apiKey || cleanToken.startsWith("dm_p")) return { items: [], nextPageToken: null };
@@ -2871,25 +3164,53 @@ async function fetchExternalDiscoveryPaged(query, language, pageToken = "") {
     if (cleanToken) return [];
     const pool = await fetchCuratedYouTubeRss({ language });
     const qLower = cleanQuery.toLowerCase();
-    return pool.filter(
-      (v) => v.title.toLowerCase().includes(qLower) || v.channelName.toLowerCase().includes(qLower) || v.tags.some((t) => t.toLowerCase().includes(qLower))
-    );
+    return pool.filter((v) => {
+      const titleLower = v.title.toLowerCase();
+      const matchesTitle = queryTerms.length > 0 && queryTerms.every((t) => titleLower.includes(t));
+      const matchesExactChannel = v.channelName.toLowerCase().includes(qLower);
+      return (matchesTitle || matchesExactChannel) && v.views >= 500;
+    });
   };
-  const [dmRes, ytRes, rssMatches] = await Promise.all([
+  const [ytApiRes, ytPublicRes, dmRes, rssMatches] = await Promise.all([
+    fetchYtSearch(),
+    !cleanToken ? fetchYouTubePublicSearch(fullQuery, language) : Promise.resolve({ items: [], channels: [] }),
     fetchDailymotionFeedPaged({
       query: fullQuery,
       language,
       page: dmPage,
       limit: 24,
-      sort: "relevance"
+      sort: "visited"
     }),
-    fetchYtSearch(),
     fetchRssSearch()
   ]);
-  const combined = interleaveProviders(ytRes.items, dmRes.items, rssMatches);
-  const nextPageToken = dmRes.nextPage ? `dm_p${dmRes.nextPage}` : ytRes.nextPageToken || null;
-  const payload = { items: combined, nextPageToken };
-  if (combined.length > 0) setCached(cacheKey, payload, FEED_CACHE_TTL_MS);
+  const primaryYtItems = ytApiRes.items.length > 0 ? ytApiRes.items : ytPublicRes.items;
+  const dmRelevant = dmRes.items.filter((v) => {
+    const titleLower = v.title.toLowerCase();
+    const matchesTerms = queryTerms.length === 0 || queryTerms.every((t) => titleLower.includes(t));
+    if (!matchesTerms) return false;
+    if (primaryYtItems.length >= 5 && v.views < 1e3) return false;
+    return true;
+  });
+  const combined = primaryYtItems.length > 0 ? (() => {
+    const seen = /* @__PURE__ */ new Set();
+    const merged = [];
+    for (const item of [...primaryYtItems, ...dmRelevant, ...rssMatches]) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        merged.push(item);
+      }
+    }
+    return merged;
+  })() : interleaveProviders(dmRelevant, rssMatches);
+  const nextPageToken = ytApiRes.nextPageToken ? ytApiRes.nextPageToken : dmRes.nextPage && (dmRelevant.length > 0 || primaryYtItems.length === 0) ? `dm_p${dmRes.nextPage}` : null;
+  const payload = {
+    items: combined,
+    nextPageToken,
+    channels: !cleanToken ? ytPublicRes.channels : []
+  };
+  if (combined.length > 0 || payload.channels && payload.channels.length > 0) {
+    setCached(cacheKey, payload, FEED_CACHE_TTL_MS);
+  }
   return payload;
 }
 async function fetchExternalDiscovery(query, language) {
@@ -5179,12 +5500,55 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
         `).all(`%${q.trim().toLowerCase()}%`, `%${q.trim().toLowerCase()}%`) : [];
   }
   const extPaged = q.trim() ? await fetchExternalDiscoveryPaged(q, language, cleanToken) : await fetchExternalFeedPaged({ category, language, pageToken: cleanToken });
-  const externalMatches = filterAndSortVideos(extPaged.items, {
+  const searchOpts = {
+    query: q.trim() ? q : void 0,
+    category,
+    language,
     duration,
     uploadDate: validUploadDate,
     sort
+  };
+  let externalMatches = filterAndSortVideos(extPaged.items, {
+    ...searchOpts,
+    suppressLowViewSpam: true,
+    minTermMatchRatio: 1
   });
-  const combined = [...nativeMatches, ...externalMatches];
+  let usedRelaxed = false;
+  if (q.trim() && externalMatches.length < 4) {
+    const ytOnly = extPaged.items.filter((v) => v.id.startsWith("ext_"));
+    const relaxedExt = filterAndSortVideos(ytOnly, {
+      ...searchOpts,
+      suppressLowViewSpam: true,
+      minTermMatchRatio: 0.5
+    });
+    if (relaxedExt.length > externalMatches.length) {
+      const seenIds = new Set(externalMatches.map((v) => v.id));
+      for (const item of relaxedExt) {
+        if (!seenIds.has(item.id)) {
+          externalMatches.push(item);
+          seenIds.add(item.id);
+        }
+      }
+      usedRelaxed = true;
+    }
+  }
+  const combined = filterAndSortVideos([...nativeMatches, ...externalMatches], {
+    ...searchOpts,
+    suppressLowViewSpam: false,
+    minTermMatchRatio: usedRelaxed ? 0.5 : 1
+  });
+  const mergedChannels = [];
+  const seenChannelIds = /* @__PURE__ */ new Set();
+  const rawChannels = [
+    ...channelMatches,
+    ...extPaged.channels ?? []
+  ].sort((a, b) => Number(Boolean(b.verified)) - Number(Boolean(a.verified)) || (b.subscriberCount ?? 0) - (a.subscriberCount ?? 0));
+  for (const ch of rawChannels) {
+    if (!ch?.id || seenChannelIds.has(ch.id)) continue;
+    seenChannelIds.add(ch.id);
+    mergedChannels.push(ch);
+    if (mergedChannels.length >= 6) break;
+  }
   if (!cleanToken && req.auth && q.trim().length >= 2) {
     const uid = req.auth.userId;
     const userPref = db.prepare("SELECT history_paused FROM users WHERE id = ?").get(uid);
@@ -5202,7 +5566,7 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
   }
   res.json({
     videos: combined,
-    channels: channelMatches,
+    channels: mergedChannels,
     nextPageToken: extPaged.nextPageToken,
     hasMore: Boolean(extPaged.nextPageToken),
     discoveryStatus: getDiscoveryStatus()
