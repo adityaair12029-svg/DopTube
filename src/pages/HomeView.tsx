@@ -356,12 +356,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             </section>
           )}
-          {/* Conditional AI Sections (Continue watching, Subscriptions, Interest Spotlight, Trending India) */}
+          {/* Conditional AI Sections (Continue watching, Subscriptions, Interest Spotlight, Discover new creators, Language, Trending India) */}
           {homeFeedTab === 'for_you' &&
             !isFiltered &&
-            sections.slice(0, 2).map((sec) => (
+            sections.map((sec) => (
               <section key={sec.id} className="mt-4 mb-7">
-                <h2 className="text-base font-bold mb-3 px-3 sm:px-0 text-[#0f1419] dark:text-[#e7e9ea]">
+                <h2 className="text-base font-bold mb-3 px-3 sm:px-0 text-[var(--dt-text)]">
                   {sec.title}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-6">

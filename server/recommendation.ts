@@ -127,22 +127,34 @@ function normalize01(value: number, max: number): number {
   return Math.max(0, Math.min(1, value / max));
 }
 
-export function scoreCandidate(
+export interface ScoredRecommendationResult {
+  score: number;
+  recommendationReasons: string[];
+  recommendationReason?: string;
+}
+
+export function scoreCandidateWithReason(
   video: CandidateVideo,
   ctx: UserAiContext,
   weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
   nowMs = Date.now()
-): number {
+): ScoredRecommendationResult {
   const haystack = `${video.title} ${video.description} ${video.category} ${video.tags.join(' ')}`.toLowerCase();
 
   // 1. User Interest Match (0..1)
   let interestSum = 0;
   let interestHits = 0;
+  let topMatchedTopic = '';
+  let topMatchedScore = -1;
   for (const [topic, score] of Object.entries(ctx.interestScores)) {
     const t = topic.toLowerCase();
     if (video.category.toLowerCase() === t || video.tags.some((tg) => tg.toLowerCase() === t) || haystack.includes(t)) {
       interestSum += score / 100;
       interestHits += 1;
+      if (score > topMatchedScore) {
+        topMatchedScore = score;
+        topMatchedTopic = topic;
+      }
     }
   }
   const userInterestMatch = ctx.personalizationEnabled
@@ -150,14 +162,14 @@ export function scoreCandidate(
     : 0.2;
 
   // 2. Topic & Language Match (0..1)
-  let langMatch = ctx.preferredLanguages.includes(video.language) ? 0.6 : 0.15;
-  if (ctx.preferredCategories.includes(video.category)) langMatch += 0.3;
-  for (const term of ctx.recentSearches) {
-    if (term.length >= 2 && haystack.includes(term.toLowerCase())) {
-      langMatch += 0.08;
-      break;
-    }
-  }
+  const matchesLanguage = ctx.preferredLanguages.includes(video.language);
+  const matchesPreferredCategory = ctx.preferredCategories.includes(video.category);
+  const matchesRecentSearch = ctx.recentSearches.some(
+    (term) => term.trim().length >= 2 && haystack.includes(term.trim().toLowerCase())
+  );
+  let langMatch = matchesLanguage ? 0.6 : 0.15;
+  if (matchesPreferredCategory) langMatch += 0.3;
+  if (matchesRecentSearch) langMatch += 0.08;
   const topicLanguageMatch = Math.min(1, langMatch);
 
   // 3. Explicit Feedback Signal (0..1)
@@ -180,7 +192,8 @@ export function scoreCandidate(
   const contentQualitySafety = Math.min(1, verifiedScore + popularityScore + metadataScore);
 
   // 6. Creator Affinity (0..1)
-  const subScore = ctx.subscribedChannelIds.has(video.channelId) ? 0.75 : 0;
+  const isSubscribed = ctx.subscribedChannelIds.has(video.channelId);
+  const subScore = isSubscribed ? 0.75 : 0;
   const creatorWatches = ctx.creatorWatchCounts[video.channelId] ?? 0;
   const creatorAffinity = Math.min(1, subScore + Math.min(0.35, creatorWatches * 0.1));
 
@@ -209,16 +222,50 @@ export function scoreCandidate(
     video.sourceType === 'native' &&
     video.views < 25 &&
     (!ctx.userId || video.ownerUserId !== ctx.userId) &&
-    !ctx.subscribedChannelIds.has(video.channelId) &&
+    !isSubscribed &&
     interestHits === 0 &&
-    !ctx.preferredCategories.includes(video.category) &&
-    !ctx.recentSearches.some((term) => term.length >= 2 && haystack.includes(term.toLowerCase()));
+    !matchesPreferredCategory &&
+    !matchesRecentSearch;
 
   if (isOtherLowViewNative) {
     finalScore -= 24;
   }
 
-  return Number(Math.max(0, finalScore).toFixed(3));
+  const recommendationReasons: string[] = [];
+  if (isSubscribed) {
+    recommendationReasons.push('Subscribed creator');
+  }
+  if (ctx.personalizationEnabled && (topMatchedTopic || matchesPreferredCategory)) {
+    const topicLabel = topMatchedTopic || video.category;
+    recommendationReasons.push(`Matches your interest in ${topicLabel}`);
+  }
+  if (matchesRecentSearch) {
+    recommendationReasons.push('Matches your recent search');
+  }
+  if (matchesLanguage) {
+    recommendationReasons.push(`In your preferred language (${video.language})`);
+  }
+  if (ageHours <= 72) {
+    recommendationReasons.push('Fresh upload');
+  }
+  if (video.views >= 100_000 || video.isLive) {
+    recommendationReasons.push('Popular in India');
+  }
+
+  return {
+    score: Number(Math.max(0, finalScore).toFixed(3)),
+    recommendationReasons,
+    recommendationReason: recommendationReasons[0],
+  };
+}
+
+export function scoreCandidate(
+  video: CandidateVideo,
+  ctx: UserAiContext,
+  weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
+  nowMs = Date.now()
+): number {
+  return scoreCandidateWithReason(video, ctx, weights, nowMs).score;
 }
 
 function normalizeTitlePrefix(title?: string): string {
@@ -293,7 +340,12 @@ export function generatePersonalizedRecommendations(
   candidates: CandidateVideo[],
   ctx: UserAiContext,
   opts?: { weights?: RankingWeights; nowMs?: number; limit?: number; cursor?: number }
-): { items: Array<CandidateVideo & { score: number }>; nextCursor: number | null; hasMore: boolean; total: number } {
+): {
+  items: Array<CandidateVideo & { score: number; recommendationReasons: string[]; recommendationReason?: string }>;
+  nextCursor: number | null;
+  hasMore: boolean;
+  total: number;
+} {
   const validCandidates = candidates.filter((c) => validateContentCandidate(c, ctx.validation).valid);
 
   // Deduplicate by id
@@ -305,10 +357,15 @@ export function generatePersonalizedRecommendations(
   });
 
   const scored = unique
-    .map((v) => ({
-      ...v,
-      score: scoreCandidate(v, ctx, opts?.weights ?? DEFAULT_RANKING_WEIGHTS, opts?.nowMs),
-    }))
+    .map((v) => {
+      const scoredRes = scoreCandidateWithReason(v, ctx, opts?.weights ?? DEFAULT_RANKING_WEIGHTS, opts?.nowMs);
+      return {
+        ...v,
+        score: scoredRes.score,
+        recommendationReasons: scoredRes.recommendationReasons,
+        recommendationReason: scoredRes.recommendationReason,
+      };
+    })
     .sort((a, b) => b.score - a.score);
 
   const diversified = diversifyFeed(scored, 1, 2);
@@ -366,25 +423,85 @@ export function rankRelatedVideos(
   return diversifyFeed(sorted, 2, 3);
 }
 
-export function rankShortsFeed(candidates: CandidateVideo[], ctx: UserAiContext, nowMs = Date.now()): CandidateVideo[] {
-  const valid = candidates.filter((c) => c.isShort && validateContentCandidate(c, ctx.validation).valid);
-  const shortsWeights: RankingWeights = {
-    userInterestMatch: 0.25,
-    topicLanguageMatch: 0.15,
-    explicitFeedback: 0.20,
-    predictedSatisfaction: 0.20,
-    contentQualitySafety: 0.05,
-    creatorAffinity: 0.05,
-    freshnessBoost: 0.05,
-    explorationDiversity: 0.05,
-  };
+export type ShortsFeedMode = 'for_you' | 'following' | 'trending' | 'new_creators';
+
+export function rankShortsFeed(
+  candidates: CandidateVideo[],
+  ctx: UserAiContext,
+  nowMs = Date.now(),
+  opts?: { mode?: ShortsFeedMode; category?: string }
+): Array<CandidateVideo & { recommendationReasons: string[]; recommendationReason?: string }> {
+  const mode = opts?.mode ?? 'for_you';
+  const catFilter = (opts?.category ?? 'All').trim();
+
+  let valid = candidates.filter((c) => c.isShort && validateContentCandidate(c, ctx.validation).valid);
+  if (catFilter && catFilter !== 'All') {
+    const catNorm = catFilter.toLowerCase();
+    valid = valid.filter(
+      (c) =>
+        c.category.toLowerCase() === catNorm ||
+        c.tags.some((t) => t.toLowerCase() === catNorm)
+    );
+  }
+
+  if (mode === 'following') {
+    valid = valid.filter((c) => ctx.subscribedChannelIds.has(c.channelId));
+  } else if (mode === 'new_creators') {
+    valid = valid.filter((c) => c.subscriberCount < 250_000);
+  }
+
+  const shortsWeights: RankingWeights =
+    mode === 'trending'
+      ? {
+          userInterestMatch: 0.1,
+          topicLanguageMatch: 0.1,
+          explicitFeedback: 0.15,
+          predictedSatisfaction: 0.25,
+          contentQualitySafety: 0.2,
+          creatorAffinity: 0.05,
+          freshnessBoost: 0.1,
+          explorationDiversity: 0.05,
+        }
+      : mode === 'new_creators'
+      ? {
+          userInterestMatch: 0.2,
+          topicLanguageMatch: 0.15,
+          explicitFeedback: 0.15,
+          predictedSatisfaction: 0.15,
+          contentQualitySafety: 0.05,
+          creatorAffinity: 0.05,
+          freshnessBoost: 0.15,
+          explorationDiversity: 0.1,
+        }
+      : {
+          userInterestMatch: 0.25,
+          topicLanguageMatch: 0.15,
+          explicitFeedback: 0.2,
+          predictedSatisfaction: 0.2,
+          contentQualitySafety: 0.05,
+          creatorAffinity: 0.05,
+          freshnessBoost: 0.05,
+          explorationDiversity: 0.05,
+        };
+
   return diversifyFeed(
     valid
-      .map((v) => ({ ...v, _s: scoreCandidate(v, ctx, shortsWeights, nowMs) }))
+      .map((v) => {
+        const res = scoreCandidateWithReason(v, ctx, shortsWeights, nowMs);
+        return {
+          ...v,
+          _s:
+            mode === 'trending'
+              ? res.score + Math.log10(Math.max(10, v.views)) * 12
+              : res.score,
+          recommendationReasons: res.recommendationReasons,
+          recommendationReason: res.recommendationReason,
+        };
+      })
       .sort((a, b) => b._s - a._s),
     1,
     2
-  );
+  ).map(({ _s: _unused, ...rest }) => rest);
 }
 
 export interface NextVideoInput {
@@ -436,45 +553,105 @@ export function buildConditionalSections(params: {
   trending: CandidateVideo[];
   subscribedVideos: CandidateVideo[];
   topInterestTopic?: string;
+  preferredLanguage?: string;
+  newCreators?: CandidateVideo[];
 }): HomepageSection[] {
   const sections: HomepageSection[] = [];
+  const usedIds = new Set<string>();
+
+  const takeUnique = (pool: CandidateVideo[], limit = 4): CandidateVideo[] => {
+    const out: CandidateVideo[] = [];
+    for (const v of pool) {
+      if (!v?.id || usedIds.has(v.id)) continue;
+      if (out.some((x) => x.id === v.id)) continue;
+      usedIds.add(v.id);
+      out.push(v);
+      if (out.length >= limit) break;
+    }
+    return out;
+  };
 
   if (params.continueWatching.length > 0) {
-    sections.push({
-      id: 'continue_watching',
-      title: 'Continue watching',
-      videos: params.continueWatching.slice(0, 4),
-    });
+    const items = takeUnique(params.continueWatching, 4);
+    if (items.length > 0) {
+      sections.push({
+        id: 'continue_watching',
+        title: 'Continue watching',
+        videos: items,
+      });
+    }
   }
 
   if (params.subscribedVideos.length > 0) {
-    sections.push({
-      id: 'from_subscriptions',
-      title: 'From creators you follow',
-      videos: params.subscribedVideos.slice(0, 4),
-    });
+    const items = takeUnique(params.subscribedVideos, 4);
+    if (items.length > 0) {
+      sections.push({
+        id: 'from_subscriptions',
+        title: 'From creators you follow',
+        videos: items,
+      });
+    }
   }
 
   if (params.topInterestTopic) {
+    const topicNorm = params.topInterestTopic.toLowerCase();
     const topicMatches = params.recommended.filter(
       (v) =>
-        v.category.toLowerCase() === params.topInterestTopic!.toLowerCase() ||
-        v.tags.some((t) => t.toLowerCase() === params.topInterestTopic!.toLowerCase())
+        !usedIds.has(v.id) &&
+        (v.category.toLowerCase() === topicNorm || v.tags.some((t) => t.toLowerCase() === topicNorm))
     );
     if (topicMatches.length >= 2) {
+      const items = takeUnique(topicMatches, 4);
       sections.push({
         id: 'interest_spotlight',
         title: `Because you follow ${params.topInterestTopic}`,
-        videos: topicMatches.slice(0, 4),
+        videos: items,
+      });
+    }
+  }
+
+  const newCreatorPool =
+    params.newCreators && params.newCreators.length > 0
+      ? params.newCreators
+      : params.recommended.filter((v) => v.subscriberCount > 0 && v.subscriberCount < 250_000);
+  const diversifiedNewCreators = diversifyFeed(
+    newCreatorPool.filter((v) => !usedIds.has(v.id)),
+    1,
+    1
+  );
+  if (diversifiedNewCreators.length >= 2) {
+    const items = takeUnique(diversifiedNewCreators, 4);
+    if (items.length >= 2) {
+      sections.push({
+        id: 'discover_new_creators',
+        title: 'Discover new creators',
+        videos: items,
+      });
+    }
+  }
+
+  if (params.preferredLanguage && params.preferredLanguage !== 'All') {
+    const langNorm = params.preferredLanguage.toLowerCase();
+    const langMatches = params.recommended.filter(
+      (v) => !usedIds.has(v.id) && v.language.toLowerCase() === langNorm
+    );
+    if (langMatches.length >= 2) {
+      const items = takeUnique(langMatches, 4);
+      sections.push({
+        id: 'popular_language',
+        title: `Popular in ${params.preferredLanguage}`,
+        videos: items,
       });
     }
   }
 
   if (params.trending.length > 0) {
+    const freshTrending = takeUnique(params.trending, 4);
+    const items = freshTrending.length > 0 ? freshTrending : params.trending.slice(0, 4);
     sections.push({
       id: 'trending_india',
       title: 'Trending in India',
-      videos: params.trending.slice(0, 4),
+      videos: items,
     });
   }
 

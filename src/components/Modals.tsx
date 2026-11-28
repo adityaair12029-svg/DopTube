@@ -150,8 +150,11 @@ export const UploadModal: React.FC<{
   onUploaded: (videoId: string) => void;
   onOpenMusicUpload?: () => void;
 }> = ({ open, onClose, onUploaded, onOpenMusicUpload }) => {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [dragActive, setDragActive] = useState(false);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [thumbFile, setThumbFile] = useState<File | null>(null);
+  const [thumbPreviewUrl, setThumbPreviewUrl] = useState<string>('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Education');
@@ -164,25 +167,74 @@ export const UploadModal: React.FC<{
   const [uploadPct, setUploadPct] = useState(0);
   const [processingStage, setProcessingStage] = useState('');
   const [processingPct, setProcessingPct] = useState(0);
+  const [publishedVideoId, setPublishedVideoId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!thumbFile) {
+      setThumbPreviewUrl('');
+      return;
+    }
+    const url = URL.createObjectURL(thumbFile);
+    setThumbPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [thumbFile]);
+
+  const resetAndClose = () => {
+    if (uploading) return;
+    setStep(1);
+    setDragActive(false);
+    setVideoFile(null);
+    setThumbFile(null);
+    setTitle('');
+    setDescription('');
+    setCategory('Education');
+    setLanguage('Hindi');
+    setTags('');
+    setVisibility('public');
+    setIsShort(false);
+    setUploadPct(0);
+    setProcessingStage('');
+    setProcessingPct(0);
+    setPublishedVideoId(null);
+    setError('');
+    onClose();
+  };
+
   if (!open) return null;
+
+  const acceptPickedVideo = (file: File | null) => {
+    if (!file) return;
+    setVideoFile(file);
+    setError('');
+    if (!title.trim()) {
+      setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '));
+    }
+  };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!videoFile) {
       setError('Please select a video file (MP4, WebM, or MOV).');
+      setStep(1);
+      return;
+    }
+    if (title.trim().length < 3) {
+      setError('Please enter a video title (at least 3 characters).');
+      setStep(2);
       return;
     }
     setError('');
     setUploading(true);
     setUploadPct(0);
+    setProcessingStage('');
+    setProcessingPct(0);
 
     try {
       const fd = new FormData();
       fd.append('video', videoFile);
       if (thumbFile) fd.append('thumbnail', thumbFile);
-      fd.append('title', title);
+      fd.append('title', title.trim());
       fd.append('description', description);
       fd.append('category', category);
       fd.append('language', language);
@@ -193,46 +245,45 @@ export const UploadModal: React.FC<{
       const { videoId } = await uploadWithProgress('/api/videos/upload', fd, setUploadPct);
       setProcessingStage('Queued for FFmpeg HLS transcoding...');
 
-      const poll = async () => {
-        for (let i = 0; i < 40; i++) {
-          await new Promise((r) => setTimeout(r, 750));
-          const st = await apiFetch<{ stage: string; progress: number; status: string; video_status: string }>(
-            `/api/videos/${videoId}/status`
-          );
-          setProcessingStage(st.stage);
-          setProcessingPct(st.progress);
-          if (st.status === 'completed' || st.video_status === 'published') {
-            setUploading(false);
-            onUploaded(videoId);
-            onClose();
-            return;
-          }
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 750));
+        const st = await apiFetch<{ stage: string; progress: number; status: string; video_status: string }>(
+          `/api/videos/${videoId}/status`
+        );
+        setProcessingStage(st.stage);
+        setProcessingPct(st.progress);
+        if (st.status === 'completed' || st.video_status === 'published') {
+          break;
         }
-        setUploading(false);
-        onUploaded(videoId);
-        onClose();
-      };
-      await poll();
+      }
+      setUploading(false);
+      setPublishedVideoId(videoId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed.');
       setUploading(false);
     }
   };
 
+  const wizardSteps = [
+    { id: 1 as const, label: '1. Media' },
+    { id: 2 as const, label: '2. Details & Thumbnail' },
+    { id: 3 as const, label: '3. Visibility & Publish' },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-black border border-[#e5e7eb] dark:border-[#2f3336] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="px-6 py-4 border-b border-neutral-200 dark:border-[#383838] flex items-center justify-between">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-[var(--dt-surface)] border border-[var(--dt-border)] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="px-6 py-4 border-b border-[var(--dt-border)] flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold">Upload video to DopTube</h2>
-            {onOpenMusicUpload && (
+            {onOpenMusicUpload && !publishedVideoId && (
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
+                  resetAndClose();
                   onOpenMusicUpload();
                 }}
-                className="text-xs text-[#536471] dark:text-[#71767b] hover:text-[#0f1419] dark:hover:text-white hover:underline cursor-pointer"
+                className="text-xs text-[var(--dt-muted)] hover:text-[var(--dt-text)] hover:underline cursor-pointer"
               >
                 Want to upload an MP3/M4A audio track to DopTube Music instead?
               </button>
@@ -240,13 +291,42 @@ export const UploadModal: React.FC<{
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={resetAndClose}
+            disabled={uploading}
             aria-label="Close upload dialog"
-            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-neutral-100 dark:hover:bg-[#383838] cursor-pointer"
+            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[var(--dt-hover)] disabled:opacity-50 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* 3-Step Indicator */}
+        {!publishedVideoId && (
+          <div className="px-6 py-2.5 border-b border-[var(--dt-border)] bg-[var(--dt-bg)] flex items-center gap-2 overflow-x-auto no-scrollbar">
+            {wizardSteps.map((ws) => {
+              const active = step === ws.id;
+              const completed = step > ws.id;
+              return (
+                <button
+                  key={ws.id}
+                  type="button"
+                  disabled={uploading || (ws.id > 1 && !videoFile)}
+                  onClick={() => setStep(ws.id)}
+                  className={`h-7 px-3 rounded-full text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer disabled:opacity-50 ${
+                    active
+                      ? 'bg-[#0f1419] dark:bg-white text-white dark:text-black'
+                      : completed
+                        ? 'bg-[var(--dt-hover)] text-[var(--dt-text)]'
+                        : 'text-[var(--dt-muted)] hover:bg-[var(--dt-hover)]'
+                  }`}
+                >
+                  {completed && <Check className="w-3 h-3" />}
+                  <span>{ws.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <form onSubmit={handleUpload} className="p-6 overflow-y-auto space-y-4">
           {error && (
@@ -255,166 +335,298 @@ export const UploadModal: React.FC<{
             </div>
           )}
 
-          {/* Video File Picker */}
-          <label className="block border-2 border-dashed border-[#e5e7eb] dark:border-[#2f3336] rounded-xl p-6 text-center cursor-pointer hover:border-[#0f1419] dark:hover:border-white transition-colors">
-            <input
-              type="file"
-              accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0] ?? null;
-                setVideoFile(file);
-                if (file && !title) {
-                  setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' '));
-                }
-              }}
-            />
-            <div className="w-12 h-12 rounded-full bg-neutral-100 dark:bg-[#2c2c2c] mx-auto flex items-center justify-center mb-2">
-              {videoFile ? <FileVideo className="w-6 h-6 text-[#0f1419] dark:text-white" /> : <Upload className="w-6 h-6" />}
-            </div>
-            <p className="text-sm font-medium">
-              {videoFile ? `${videoFile.name} (${(videoFile.size / (1024 * 1024)).toFixed(2)} MB)` : 'Select MP4, WebM, or MOV video file'}
-            </p>
-            <p className="text-xs text-[#606060] dark:text-[#aaaaaa] mt-1">
-              Processed automatically with FFmpeg for adaptive 360p & 720p HLS streaming
-            </p>
-          </label>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-medium mb-1">Title *</label>
-              <input
-                type="text"
-                required
-                minLength={3}
-                maxLength={160}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Add a clear title describing your video"
-                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-medium mb-1">Description</label>
-              <textarea
-                rows={3}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Tell viewers about your video..."
-                className="w-full p-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
-              >
-                {ALL_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Language</label>
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
-              >
-                {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((l) => (
-                  <option key={l} value={l}>{l}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Visibility</label>
-              <select
-                value={visibility}
-                onChange={(e) => setVisibility(e.target.value as 'public' | 'unlisted' | 'private')}
-                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
-              >
-                <option value="public">Public</option>
-                <option value="unlisted">Unlisted</option>
-                <option value="private">Private</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Tags (comma separated)</label>
-              <input
-                type="text"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                placeholder="e.g. physics, jee, hindi"
-                className="w-full h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1">Custom Thumbnail (optional)</label>
-              <label className="h-10 px-3 rounded-lg bg-[#eff3f4] dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] text-xs flex items-center gap-2 cursor-pointer">
-                <ImagePlus className="w-4 h-4 shrink-0" />
-                <span className="truncate">{thumbFile ? thumbFile.name : 'Auto-generate from video'}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-            </div>
-
-            <div className="flex items-center pt-4">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isShort}
-                  onChange={(e) => setIsShort(e.target.checked)}
-                  className="w-4 h-4 accent-[#0f1419] dark:accent-white"
-                />
-                <span>Publish as DopTube Short (vertical)</span>
-              </label>
-            </div>
-          </div>
-
-          {uploading && (
-            <div className="p-4 rounded-xl bg-neutral-100 dark:bg-[#181818] space-y-2">
-              <div className="flex items-center justify-between text-xs font-medium">
-                <span>{processingStage || 'Uploading video bytes...'}</span>
-                <span className="font-mono-nums">{processingStage ? `${processingPct}%` : `${uploadPct}%`}</span>
+          {publishedVideoId ? (
+            <div className="py-8 text-center space-y-4">
+              <div className="w-14 h-14 rounded-full jio-gradient text-white mx-auto flex items-center justify-center shadow-lg">
+                <Check className="w-7 h-7" />
               </div>
-              <div className="h-2 rounded-full bg-neutral-300 dark:bg-[#333] overflow-hidden">
-                <div
-                  className="h-full bg-[#0f1419] dark:bg-white transition-all duration-200"
-                  style={{ width: `${processingStage ? processingPct : uploadPct}%` }}
-                />
+              <div>
+                <h3 className="text-lg font-bold">Video published on DopTube!</h3>
+                <p className="text-sm text-[var(--dt-muted)] mt-1">
+                  “{title}” is ready for playback ({visibility}).
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={resetAndClose}
+                  className="h-9 px-4 rounded-full border border-[var(--dt-border)] hover:bg-[var(--dt-hover)] text-sm font-medium cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = publishedVideoId;
+                    setPublishedVideoId(null);
+                    setStep(1);
+                    setVideoFile(null);
+                    setThumbFile(null);
+                    setTitle('');
+                    setDescription('');
+                    setTags('');
+                    onClose();
+                    onUploaded(id);
+                  }}
+                  className="h-9 px-5 rounded-full jio-gradient text-white text-sm font-semibold cursor-pointer shadow-sm"
+                >
+                  Watch Video
+                </button>
               </div>
             </div>
+          ) : (
+            <>
+              {step === 1 && (
+                <div className="space-y-4">
+                  <label
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragActive(true);
+                    }}
+                    onDragLeave={() => setDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragActive(false);
+                      const file = e.dataTransfer.files?.[0] ?? null;
+                      acceptPickedVideo(file);
+                    }}
+                    className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+                      dragActive
+                        ? 'border-[#2f80ed] bg-blue-500/5'
+                        : 'border-[var(--dt-border)] hover:border-[#0f1419] dark:hover:border-white'
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+                      className="hidden"
+                      onChange={(e) => acceptPickedVideo(e.target.files?.[0] ?? null)}
+                    />
+                    <div className="w-14 h-14 rounded-full bg-[var(--dt-hover)] mx-auto flex items-center justify-center mb-3">
+                      {videoFile ? (
+                        <FileVideo className="w-7 h-7 text-[#2f80ed]" />
+                      ) : (
+                        <Upload className="w-7 h-7" />
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold">
+                      {videoFile
+                        ? `${videoFile.name} (${(videoFile.size / (1024 * 1024)).toFixed(2)} MB)`
+                        : 'Drag & drop or select an MP4, WebM, or MOV video file'}
+                    </p>
+                    <p className="text-xs text-[var(--dt-muted)] mt-1">
+                      Processed automatically with FFmpeg for adaptive 360p & 720p HLS streaming
+                    </p>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 p-3 rounded-xl bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isShort}
+                      onChange={(e) => setIsShort(e.target.checked)}
+                      className="w-4 h-4 accent-[#0f1419] dark:accent-white"
+                    />
+                    <div>
+                      <span className="font-medium block">Publish as DopTube Short (vertical)</span>
+                      <span className="text-xs text-[var(--dt-muted)]">
+                        Vertical 9:16 videos appear in the TADKA / Shorts vertical feed
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {step === 2 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium mb-1">Title *</label>
+                    <input
+                      type="text"
+                      required
+                      minLength={3}
+                      maxLength={160}
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Add a clear title describing your video"
+                      className="w-full h-10 px-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium mb-1">Description</label>
+                    <textarea
+                      rows={3}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Tell viewers about your video..."
+                      className="w-full p-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Category</label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full h-10 px-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm"
+                    >
+                      {ALL_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Tags (comma separated)</label>
+                    <input
+                      type="text"
+                      value={tags}
+                      onChange={(e) => setTags(e.target.value)}
+                      placeholder="e.g. physics, jee, hindi"
+                      className="w-full h-10 px-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium mb-1">Custom Thumbnail (optional)</label>
+                    <div className="flex items-center gap-3">
+                      <label className="flex-1 h-10 px-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-xs flex items-center gap-2 cursor-pointer">
+                        <ImagePlus className="w-4 h-4 shrink-0" />
+                        <span className="truncate">
+                          {thumbFile ? thumbFile.name : 'Auto-generate from video (or choose image)'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => setThumbFile(e.target.files?.[0] ?? null)}
+                        />
+                      </label>
+                      {thumbPreviewUrl && (
+                        <img
+                          src={thumbPreviewUrl}
+                          alt="Thumbnail preview"
+                          className="w-20 aspect-video rounded-lg object-cover border border-[var(--dt-border)] shrink-0"
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {step === 3 && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Visibility</label>
+                      <select
+                        value={visibility}
+                        onChange={(e) => setVisibility(e.target.value as 'public' | 'unlisted' | 'private')}
+                        className="w-full h-10 px-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm"
+                      >
+                        <option value="public">Public (Everyone can watch)</option>
+                        <option value="unlisted">Unlisted (Anyone with link)</option>
+                        <option value="private">Private (Only you)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Language</label>
+                      <select
+                        value={language}
+                        onChange={(e) => setLanguage(e.target.value)}
+                        className="w-full h-10 px-3 rounded-lg bg-[var(--dt-bg)] border border-[var(--dt-border)] text-sm"
+                      >
+                        {INDIAN_LANGUAGES.filter((l) => l !== 'All').map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Summary card */}
+                  <div className="p-3.5 rounded-xl bg-[var(--dt-bg)] border border-[var(--dt-border)] text-xs space-y-1">
+                    <p className="font-semibold text-sm truncate">{title || 'Untitled Video'}</p>
+                    <p className="text-[var(--dt-muted)]">
+                      {category} · {language} · {isShort ? 'DopTube Short (9:16)' : 'Standard Video'} · {visibility}
+                    </p>
+                    {videoFile && (
+                      <p className="text-[var(--dt-muted)] truncate">
+                        Source: {videoFile.name} ({(videoFile.size / (1024 * 1024)).toFixed(2)} MB)
+                      </p>
+                    )}
+                  </div>
+
+                  {uploading && (
+                    <div className="p-4 rounded-xl bg-[var(--dt-bg)] border border-[var(--dt-border)] space-y-2">
+                      <div className="flex items-center justify-between text-xs font-medium">
+                        <span>{processingStage || 'Uploading video bytes...'}</span>
+                        <span className="font-mono-nums">{processingStage ? `${processingPct}%` : `${uploadPct}%`}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--dt-hover)] overflow-hidden">
+                        <div
+                          className="h-full jio-gradient transition-all duration-200"
+                          style={{ width: `${processingStage ? processingPct : uploadPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (step === 1) resetAndClose();
+                    else setStep((s) => (s === 3 ? 2 : 1));
+                  }}
+                  disabled={uploading}
+                  className="h-9 px-4 rounded-full text-sm font-medium hover:bg-[var(--dt-hover)] cursor-pointer disabled:opacity-50"
+                >
+                  {step === 1 ? 'Cancel' : 'Back'}
+                </button>
+
+                {step < 3 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (step === 1) {
+                        if (!videoFile) {
+                          setError('Please select a video file first.');
+                          return;
+                        }
+                        setError('');
+                        setStep(2);
+                      } else {
+                        if (title.trim().length < 3) {
+                          setError('Please enter a title of at least 3 characters.');
+                          return;
+                        }
+                        setError('');
+                        setStep(3);
+                      }
+                    }}
+                    className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-semibold cursor-pointer"
+                  >
+                    {step === 1 ? 'Next: Details' : 'Next: Visibility'}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={uploading}
+                    className="h-9 px-5 rounded-full jio-gradient text-white text-sm font-semibold disabled:opacity-60 cursor-pointer shadow-sm"
+                  >
+                    {uploading ? 'Processing...' : 'Publish Video'}
+                  </button>
+                )}
+              </div>
+            </>
           )}
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={uploading}
-              className="h-9 px-4 rounded-full text-sm font-medium hover:bg-neutral-100 dark:hover:bg-[#333] cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={uploading}
-              className="h-9 px-5 rounded-full bg-[#0f1419] dark:bg-white text-white dark:text-black text-sm font-semibold disabled:opacity-60 cursor-pointer"
-            >
-              {uploading ? 'Processing...' : 'Publish Video'}
-            </button>
-          </div>
         </form>
       </div>
     </div>

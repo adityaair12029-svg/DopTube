@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, Loader2, Mic, MicOff, Send, Sparkles, Trash2, X } from 'lucide-react';
-import type { UserProfile } from '../types';
+import { Bot, Loader2, Maximize2, Mic, MicOff, Minimize2, Send, Sparkles, Trash2, X } from 'lucide-react';
+import type { UserProfile, VideoItem } from '../types';
 import { apiFetch } from '../lib/api';
 
 type ChatRole = 'general' | 'fast' | 'creator' | 'discovery';
@@ -40,8 +40,12 @@ const STARTER_PROMPTS: Record<ChatRole, string[]> = {
 export const GeminiChatbot: React.FC<{
   user: UserProfile | null;
   hideOnMobile?: boolean;
-}> = ({ user, hideOnMobile = false }) => {
+  hideFab?: boolean;
+  activeWatchVideo?: VideoItem | null;
+}> = ({ user, hideOnMobile = false, hideFab = false, activeWatchVideo = null }) => {
   const [open, setOpen] = useState(false);
+  const [fabCompact, setFabCompact] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [selectedRole, setSelectedRole] = useState<ChatRole>('general');
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
@@ -147,6 +151,16 @@ export const GeminiChatbot: React.FC<{
           message: clean,
           role: selectedRole,
           history: messages.slice(-16).map((m) => ({ role: m.role, text: m.text })),
+          videoContext: activeWatchVideo
+            ? {
+                id: activeWatchVideo.id,
+                title: activeWatchVideo.title,
+                channelName: activeWatchVideo.channelName,
+                category: activeWatchVideo.category,
+                language: activeWatchVideo.language,
+                description: activeWatchVideo.description,
+              }
+            : null,
         }),
       });
       setMessages((prev) => [
@@ -173,41 +187,68 @@ export const GeminiChatbot: React.FC<{
 
   return (
     <>
-      {!open && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Ask DopTube AI"
-          className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 p-[1.5px] rounded-full bg-gradient-to-r from-[#38bdf8] via-[#818cf8] to-[#ec4899] shadow-[0_8px_28px_rgba(56,189,248,0.28)] cursor-pointer hover:scale-[1.03] active:scale-[0.98] transition-all ${
+      {!open && !hideFab && (
+        <div
+          className={`fixed bottom-20 md:bottom-6 right-4 md:right-6 z-40 items-center gap-1.5 ${
             hideOnMobile ? 'hidden md:flex' : 'flex'
           }`}
         >
-          <span className="h-11 px-4 rounded-full bg-[#090e24]/95 backdrop-blur-md text-white font-semibold text-[15px] flex items-center gap-2">
-            <span className="relative inline-flex items-center justify-center">
-              <Mic className="w-[18px] h-[18px] text-[#e2e8f0]" />
-              <Sparkles className="w-2.5 h-2.5 text-[#38bdf8] absolute -top-1 -right-1 fill-current" />
-            </span>
-            <span>Ask</span>
-          </span>
-        </button>
+          {!fabCompact && (
+            <button
+              type="button"
+              onClick={() => setFabCompact(true)}
+              aria-label="Minimize Ask AI button"
+              title="Minimize"
+              className="w-6 h-6 rounded-full bg-black/50 text-white/80 hover:text-white flex items-center justify-center text-xs cursor-pointer backdrop-blur-xs"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Ask DopTube AI"
+            className="p-[1.5px] rounded-full bg-gradient-to-r from-[#38bdf8] via-[#818cf8] to-[#ec4899] shadow-[0_8px_28px_rgba(56,189,248,0.28)] cursor-pointer hover:scale-[1.03] active:scale-[0.98] transition-all"
+          >
+            {fabCompact ? (
+              <span className="w-11 h-11 rounded-full bg-[#090e24]/95 backdrop-blur-md text-white flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-[#38bdf8] fill-current" />
+              </span>
+            ) : (
+              <span className="h-11 px-3 sm:px-4 rounded-full bg-[#090e24]/95 backdrop-blur-md text-white font-semibold text-[15px] flex items-center gap-2">
+                <span className="relative inline-flex items-center justify-center">
+                  <Mic className="w-[18px] h-[18px] text-[#e2e8f0]" />
+                  <Sparkles className="w-2.5 h-2.5 text-[#38bdf8] absolute -top-1 -right-1 fill-current" />
+                </span>
+                <span className="hidden sm:inline">Ask</span>
+              </span>
+            )}
+          </button>
+        </div>
       )}
 
       {open && (
         <section
           role="dialog"
           aria-label="DopTube AI Assistant"
-          className="fixed bottom-4 md:bottom-6 right-4 md:right-6 z-50 w-[calc(100vw-2rem)] sm:w-[400px] h-[520px] max-h-[82dvh] rounded-2xl bg-white dark:bg-[#0b0f19] border border-[#e5e7eb] dark:border-[#2f3336] shadow-2xl flex flex-col overflow-hidden"
+          className={`fixed bottom-4 md:bottom-6 right-4 md:right-6 z-50 h-[520px] max-h-[82dvh] rounded-2xl bg-[var(--dt-surface)] border border-[var(--dt-border)] shadow-2xl flex flex-col overflow-hidden transition-all ${
+            expanded ? 'w-[calc(100vw-2rem)] sm:w-[540px] h-[620px]' : 'w-[calc(100vw-2rem)] sm:w-[400px]'
+          }`}
         >
           {/* Header */}
-          <div className="px-4 py-3 border-b border-[#e5e7eb] dark:border-[#1f2937] flex items-center justify-between gap-2 bg-[#eff3f4]/60 dark:bg-black/60">
+          <div className="px-4 py-3 border-b border-[var(--dt-border)] flex items-center justify-between gap-2 bg-[var(--dt-bg)]/70">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-8 h-8 rounded-full jio-gradient text-white flex items-center justify-center shrink-0">
                 <Bot className="w-4 h-4" />
               </span>
               <div className="min-w-0">
                 <h2 className="text-sm font-bold truncate">DopTube AI</h2>
-                <p className="text-[11px] text-[#536471] dark:text-[#71767b] truncate">
-                  {user ? `Tailored for ${user.name}` : activeRoleMeta.hint}
+                <p className="text-[11px] text-[var(--dt-text-muted)] truncate">
+                  {activeWatchVideo
+                    ? `Context: ${activeWatchVideo.title}`
+                    : user
+                    ? `Tailored for ${user.name}`
+                    : activeRoleMeta.hint}
                 </p>
               </div>
             </div>
@@ -221,16 +262,25 @@ export const GeminiChatbot: React.FC<{
                   }}
                   aria-label="Clear chat history"
                   title="Clear chat"
-                  className="p-1.5 rounded-full hover:bg-[#e5e7eb] dark:hover:bg-[#1c2333] text-[#536471] dark:text-[#71767b] cursor-pointer"
+                  className="p-1.5 rounded-full hover:bg-[var(--dt-surface-hover)] text-[var(--dt-text-muted)] cursor-pointer"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
               )}
               <button
                 type="button"
+                onClick={() => setExpanded((v) => !v)}
+                aria-label={expanded ? 'Collapse assistant width' : 'Expand assistant width'}
+                title={expanded ? 'Compact size' : 'Expand'}
+                className="hidden sm:flex p-1.5 rounded-full hover:bg-[var(--dt-surface-hover)] text-[var(--dt-text-muted)] cursor-pointer"
+              >
+                {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+              <button
+                type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close DopTube AI Assistant"
-                className="p-1.5 rounded-full hover:bg-[#e5e7eb] dark:hover:bg-[#1c2333] cursor-pointer"
+                className="p-1.5 rounded-full hover:bg-[var(--dt-surface-hover)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>

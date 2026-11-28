@@ -1,8 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, SlidersHorizontal } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
 import type { ChannelSummary, DiscoveryStatus, VideoItem } from '../types';
 import { formatViews, INDIAN_LANGUAGES } from '../lib/format';
 import { VideoCard } from '../components/VideoCard';
+
+const TRENDING_TOPIC_CHIPS = [
+  'JEE Physics',
+  'ISRO Mission',
+  'Indian Cricket',
+  'Coding in Hindi',
+  'Lofi Study Mix',
+  'Street Food India',
+];
 
 interface SearchViewProps {
   query: string;
@@ -16,9 +25,12 @@ interface SearchViewProps {
   sort: 'relevance' | 'date' | 'views';
   duration: 'all' | 'short' | 'medium' | 'long';
   language: string;
+  uploadDate?: 'any' | 'today' | 'week' | 'month';
   onChangeSort: (s: 'relevance' | 'date' | 'views') => void;
   onChangeDuration: (d: 'all' | 'short' | 'medium' | 'long') => void;
   onChangeLanguage: (l: string) => void;
+  onChangeUploadDate?: (u: 'any' | 'today' | 'week' | 'month') => void;
+  onQuickSearch?: (q: string) => void;
   onWatch: (videoId: string, video?: VideoItem) => void;
   onOpenChannel: (channelId: string) => void;
   onSaveWatchLater: (videoId: string) => void;
@@ -39,9 +51,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
   sort,
   duration,
   language,
+  uploadDate = 'any',
   onChangeSort,
   onChangeDuration,
   onChangeLanguage,
+  onChangeUploadDate,
+  onQuickSearch,
   onWatch,
   onOpenChannel,
   onSaveWatchLater,
@@ -69,15 +84,24 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   const showDiscoveryNotice =
     discoveryStatus && (!discoveryStatus.configured || Boolean(discoveryStatus.issue));
+  const hasActiveFilters =
+    sort !== 'relevance' || duration !== 'all' || language !== 'All' || uploadDate !== 'any';
+
+  const resetFilters = () => {
+    onChangeSort('relevance');
+    onChangeDuration('all');
+    onChangeLanguage('All');
+    onChangeUploadDate?.('any');
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 pb-20">
       {/* Search Filters Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-5 border-b border-[#e5e7eb] dark:border-[#2f3336]">
-        <div className="flex items-center gap-2 text-sm text-[#536471] dark:text-[#71767b]">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-5 border-b border-[var(--dt-border)]">
+        <div className="flex items-center gap-2 text-sm text-[var(--dt-text-muted)]">
           <SlidersHorizontal className="w-4 h-4" />
           <span>
-            Results for <strong className="text-[#0f1419] dark:text-[#e7e9ea]">“{query || 'All videos'}”</strong>
+            Results for <strong className="text-[var(--dt-text)]">“{query || 'All videos'}”</strong>
           </span>
           <span className="font-mono-nums">({videos.length})</span>
         </div>
@@ -87,7 +111,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
             aria-label="Sort search results"
             value={sort}
             onChange={(e) => onChangeSort(e.target.value as 'relevance' | 'date' | 'views')}
-            className="h-8 px-3 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-medium cursor-pointer"
+            className="h-8 px-3 rounded-full bg-[var(--dt-surface)] border border-[var(--dt-border)] text-xs font-medium cursor-pointer"
           >
             <option value="relevance">Sort: Relevance</option>
             <option value="date">Sort: Upload date</option>
@@ -95,10 +119,22 @@ export const SearchView: React.FC<SearchViewProps> = ({
           </select>
 
           <select
+            aria-label="Filter by upload date"
+            value={uploadDate}
+            onChange={(e) => onChangeUploadDate?.(e.target.value as 'any' | 'today' | 'week' | 'month')}
+            className="h-8 px-3 rounded-full bg-[var(--dt-surface)] border border-[var(--dt-border)] text-xs font-medium cursor-pointer"
+          >
+            <option value="any">Upload date: Any</option>
+            <option value="today">Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+          </select>
+
+          <select
             aria-label="Filter by duration"
             value={duration}
             onChange={(e) => onChangeDuration(e.target.value as 'all' | 'short' | 'medium' | 'long')}
-            className="h-8 px-3 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-medium cursor-pointer"
+            className="h-8 px-3 rounded-full bg-[var(--dt-surface)] border border-[var(--dt-border)] text-xs font-medium cursor-pointer"
           >
             <option value="all">Duration: Any</option>
             <option value="short">Under 4 minutes</option>
@@ -110,7 +146,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
             aria-label="Filter by language"
             value={language}
             onChange={(e) => onChangeLanguage(e.target.value)}
-            className="h-8 px-3 rounded-full bg-[#eff3f4] dark:bg-[#202327] text-xs font-medium cursor-pointer"
+            className="h-8 px-3 rounded-full bg-[var(--dt-surface)] border border-[var(--dt-border)] text-xs font-medium cursor-pointer"
           >
             {INDIAN_LANGUAGES.map((l) => (
               <option key={l} value={l}>
@@ -118,8 +154,39 @@ export const SearchView: React.FC<SearchViewProps> = ({
               </option>
             ))}
           </select>
+
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="h-8 px-3 rounded-full border border-[var(--dt-border)] hover:bg-[var(--dt-surface-hover)] text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Quick-Search Trending Topics when search query is empty */}
+      {!query.trim() && onQuickSearch && (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-[var(--dt-text-muted)] mr-1 flex items-center gap-1">
+            <Search className="w-3.5 h-3.5" />
+            <span>Explore topics:</span>
+          </span>
+          {TRENDING_TOPIC_CHIPS.map((topic) => (
+            <button
+              key={topic}
+              type="button"
+              onClick={() => onQuickSearch(topic)}
+              className="h-7 px-3 rounded-full bg-[var(--dt-surface)] border border-[var(--dt-border)] hover:bg-[var(--dt-surface-hover)] text-xs font-medium cursor-pointer transition-colors"
+            >
+              {topic}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Matching Creator Channels */}
       {channels.length > 0 && (

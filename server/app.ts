@@ -375,8 +375,8 @@ app.get('/api/auth/check-username', (req, res) => {
   });
 });
 
-app.post('/api/auth/register', rateLimit(20, 60_000), (req, res) => {
-  const { name, email, birthday = '', password, username, avatarDataUrl = '', interests = [] } = req.body as {
+app.post('/api/auth/register', rateLimit(20, 60_000), asyncRoute((req, res) => {
+  const { name, email, birthday = '', password, username, avatarDataUrl = '', interests = [] } = (req.body ?? {}) as {
     name?: string;
     email?: string;
     birthday?: string;
@@ -464,10 +464,10 @@ app.post('/api/auth/register', rateLimit(20, 60_000), (req, res) => {
   setSessionCookie(res, token, req);
   logAudit(userId, 'ACCOUNT_REGISTERED', 'user', userId, { email: cleanEmail, handle });
   res.status(201).json({ user: getUserPayload(userId), token });
-});
+}));
 
-app.post('/api/auth/login', rateLimit(25, 60_000), (req, res) => {
-  const { identifier, password } = req.body as { identifier?: string; password?: string };
+app.post('/api/auth/login', rateLimit(25, 60_000), asyncRoute((req, res) => {
+  const { identifier, password } = (req.body ?? {}) as { identifier?: string; password?: string };
   const cleanId = (identifier || '').trim().toLowerCase();
   if (!cleanId || !password) {
     res.status(400).json({ error: 'Email or username and password are required.' });
@@ -506,7 +506,7 @@ app.post('/api/auth/login', rateLimit(25, 60_000), (req, res) => {
   setSessionCookie(res, token, req);
   logAudit(row.id, 'PASSWORD_LOGIN', 'user', row.id, { email: row.email });
   res.json({ user: getUserPayload(row.id), token });
-});
+}));
 
 app.post('/api/auth/avatar', requireAuth, (req: AuthedRequest, res) => {
   const { avatarDataUrl } = req.body as { avatarDataUrl?: string };
@@ -1141,9 +1141,13 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
     language = 'All',
     sort = 'relevance',
     duration = 'all',
+    uploadDate = 'any',
     pageToken = '',
   } = req.query as Record<string, string>;
   const cleanToken = (pageToken || '').trim();
+  const validUploadDate = ['any', 'today', 'week', 'month'].includes(uploadDate)
+    ? (uploadDate as 'any' | 'today' | 'week' | 'month')
+    : 'any';
 
   let nativeMatches: ReturnType<typeof hydrateVideoRow>[] = [];
   let channelMatches: unknown[] = [];
@@ -1164,6 +1168,7 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
       language,
       sort: sort as 'relevance' | 'date' | 'views',
       duration: duration as 'all' | 'short' | 'medium' | 'long',
+      uploadDate: validUploadDate,
     });
 
     channelMatches = q.trim()
@@ -1182,6 +1187,7 @@ app.get('/api/search', asyncRoute(async (req: AuthedRequest, res) => {
 
   const externalMatches = filterAndSortVideos(extPaged.items, {
     duration: duration as 'all' | 'short' | 'medium' | 'long',
+    uploadDate: validUploadDate,
     sort: sort as 'relevance' | 'date' | 'views',
   });
   const combined = [...nativeMatches, ...externalMatches];
@@ -1470,11 +1476,7 @@ app.post('/api/channels/:id/subscribe', requireAuth, asyncRoute(async (req: Auth
 
 app.get('/api/subscriptions', (req: AuthedRequest, res) => {
   if (!req.auth) {
-    const featuredChannels = db.prepare(`
-      SELECT id, name, handle, avatar_url as avatarUrl, verified, subscriber_count as subscriberCount
-      FROM channels ORDER BY subscriber_count DESC LIMIT 7
-    `).all();
-    res.json({ channels: featuredChannels, videos: [] });
+    res.json({ channels: [], videos: [] });
     return;
   }
 
@@ -1897,7 +1899,8 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
     next(err);
     return;
   }
-  if (req.path.startsWith('/api')) {
+  const url = req.originalUrl || req.url || req.path || '';
+  if (req.path.startsWith('/api') || url.startsWith('/api')) {
     const msg = err instanceof Error ? err.message : 'Unexpected server error';
     console.error('API Error:', msg);
     res.status(500).json({ error: msg });

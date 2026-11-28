@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { UserProfile, VideoComment, VideoItem } from '../types';
 import { apiFetch } from '../lib/api';
+import { enqueueBehaviorEvent } from '../lib/eventsQueue';
 import { formatRelativeTime, formatViews } from '../lib/format';
 import { VideoCard } from '../components/VideoCard';
 import { VideoPlayer, type PlayerBehaviorEvent } from '../components/VideoPlayer';
@@ -40,6 +41,7 @@ interface WatchViewProps {
   onMinimize: (video: VideoItem) => void;
   onToast: (msg: string) => void;
   onSubscriptionsChanged: () => void;
+  onVideoLoaded?: (video: VideoItem | null) => void;
 }
 
 export const WatchView: React.FC<WatchViewProps> = ({
@@ -62,6 +64,7 @@ export const WatchView: React.FC<WatchViewProps> = ({
   onMinimize,
   onToast,
   onSubscriptionsChanged,
+  onVideoLoaded,
 }) => {
   const [video, setVideo] = useState<VideoItem | null>(null);
   const [related, setRelated] = useState<VideoItem[]>([]);
@@ -100,28 +103,34 @@ export const WatchView: React.FC<WatchViewProps> = ({
           return;
         }
         setVideo(vRes.video);
+        onVideoLoaded?.(vRes.video);
         setRelated(recRelated.videos.length > 0 ? recRelated.videos : vRes.related);
         setComments(cRes.comments);
       })
       .catch(() => {
-        if (!cancelled) setVideo(null);
+        if (!cancelled) {
+          setVideo(null);
+          onVideoLoaded?.(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
 
     return () => {
+      onVideoLoaded?.(null);
       // Emit skip event if viewer exits quickly (< 12s) without completing
       const watchedSec = Math.floor((Date.now() - startWatchTsRef.current) / 1000);
       if (!completedRef.current && watchedSec > 1 && watchedSec < 12) {
-        apiFetch('/api/events/skip', {
-          method: 'POST',
-          body: JSON.stringify({ videoId, watchDurationSec: watchedSec }),
-        }).catch(() => {});
+        enqueueBehaviorEvent({
+          eventType: 'skip',
+          videoId,
+          watchDurationSec: watchedSec,
+        });
       }
       cancelled = true;
     };
-  }, [videoId, onRedirectToShort]);
+  }, [videoId, onRedirectToShort, onVideoLoaded]);
 
   // Countdown tick for Next Video Autoplay
   useEffect(() => {
@@ -158,11 +167,20 @@ export const WatchView: React.FC<WatchViewProps> = ({
   const handleBehaviorEvent = useCallback(
     (eventType: PlayerBehaviorEvent, progressPct: number, watchDurationSec: number) => {
       if (!video) return;
-      if (eventType === 'completion') completedRef.current = true;
-      apiFetch('/api/events/watch', {
-        method: 'POST',
-        body: JSON.stringify({ videoId: video.id, eventType, progressPct, watchDurationSec }),
-      }).catch(() => {});
+      if (eventType === 'completion') {
+        completedRef.current = true;
+        apiFetch('/api/events/watch', {
+          method: 'POST',
+          body: JSON.stringify({ videoId: video.id, eventType, progressPct, watchDurationSec }),
+        }).catch(() => {});
+        return;
+      }
+      enqueueBehaviorEvent({
+        eventType,
+        videoId: video.id,
+        progressPct,
+        watchDurationSec,
+      });
     },
     [video]
   );

@@ -133,6 +133,7 @@ function rankVideos(videos, signals, nowMs = Date.now()) {
 function filterAndSortVideos(videos, opts) {
   const q = (opts.query ?? "").trim().toLowerCase();
   const terms = q ? q.split(/\s+/).filter(Boolean) : [];
+  const refNowMs = opts.nowMs ?? Date.now();
   const filtered = videos.filter((v) => {
     if (opts.category && opts.category !== "All") {
       const catNorm = opts.category.toLowerCase();
@@ -146,6 +147,16 @@ function filterAndSortVideos(videos, opts) {
       if (opts.duration === "short" && v.durationSec >= 240) return false;
       if (opts.duration === "medium" && (v.durationSec < 240 || v.durationSec > 1200)) return false;
       if (opts.duration === "long" && v.durationSec <= 1200) return false;
+    }
+    if (opts.uploadDate && opts.uploadDate !== "any") {
+      const createdMs = new Date(v.createdAt).getTime();
+      if (!Number.isNaN(createdMs)) {
+        const diffMs = Math.max(0, refNowMs - createdMs);
+        const dayMs = 24 * 60 * 60 * 1e3;
+        if (opts.uploadDate === "today" && diffMs > dayMs) return false;
+        if (opts.uploadDate === "week" && diffMs > 7 * dayMs) return false;
+        if (opts.uploadDate === "month" && diffMs > 30 * dayMs) return false;
+      }
     }
     if (terms.length > 0) {
       const text = `${v.title} ${v.description} ${v.category} ${v.language} ${v.tags.join(" ")}`.toLowerCase();
@@ -1134,26 +1145,32 @@ function normalize01(value, max) {
   if (max <= 0) return 0;
   return Math.max(0, Math.min(1, value / max));
 }
-function scoreCandidate(video, ctx, weights = DEFAULT_RANKING_WEIGHTS, nowMs = Date.now()) {
+function scoreCandidateWithReason(video, ctx, weights = DEFAULT_RANKING_WEIGHTS, nowMs = Date.now()) {
   const haystack = `${video.title} ${video.description} ${video.category} ${video.tags.join(" ")}`.toLowerCase();
   let interestSum = 0;
   let interestHits = 0;
+  let topMatchedTopic = "";
+  let topMatchedScore = -1;
   for (const [topic, score] of Object.entries(ctx.interestScores)) {
     const t = topic.toLowerCase();
     if (video.category.toLowerCase() === t || video.tags.some((tg) => tg.toLowerCase() === t) || haystack.includes(t)) {
       interestSum += score / 100;
       interestHits += 1;
+      if (score > topMatchedScore) {
+        topMatchedScore = score;
+        topMatchedTopic = topic;
+      }
     }
   }
   const userInterestMatch = ctx.personalizationEnabled ? Math.min(1, interestHits > 0 ? interestSum / Math.min(3, interestHits) : 0.15) : 0.2;
-  let langMatch = ctx.preferredLanguages.includes(video.language) ? 0.6 : 0.15;
-  if (ctx.preferredCategories.includes(video.category)) langMatch += 0.3;
-  for (const term of ctx.recentSearches) {
-    if (term.length >= 2 && haystack.includes(term.toLowerCase())) {
-      langMatch += 0.08;
-      break;
-    }
-  }
+  const matchesLanguage = ctx.preferredLanguages.includes(video.language);
+  const matchesPreferredCategory = ctx.preferredCategories.includes(video.category);
+  const matchesRecentSearch = ctx.recentSearches.some(
+    (term) => term.trim().length >= 2 && haystack.includes(term.trim().toLowerCase())
+  );
+  let langMatch = matchesLanguage ? 0.6 : 0.15;
+  if (matchesPreferredCategory) langMatch += 0.3;
+  if (matchesRecentSearch) langMatch += 0.08;
   const topicLanguageMatch = Math.min(1, langMatch);
   let explicitFeedback = 0.5;
   if (ctx.likedVideoIds.has(video.id)) explicitFeedback += 0.35;
@@ -1168,7 +1185,8 @@ function scoreCandidate(video, ctx, weights = DEFAULT_RANKING_WEIGHTS, nowMs = D
   const popularityScore = normalize01(Math.log10(Math.max(10, video.views)), 7) * 0.55;
   const metadataScore = video.description.length > 20 && video.tags.length > 0 ? 0.15 : 0.05;
   const contentQualitySafety = Math.min(1, verifiedScore + popularityScore + metadataScore);
-  const subScore = ctx.subscribedChannelIds.has(video.channelId) ? 0.75 : 0;
+  const isSubscribed = ctx.subscribedChannelIds.has(video.channelId);
+  const subScore = isSubscribed ? 0.75 : 0;
   const creatorWatches = ctx.creatorWatchCounts[video.channelId] ?? 0;
   const creatorAffinity = Math.min(1, subScore + Math.min(0.35, creatorWatches * 0.1));
   const ageHours = Math.max(0.5, (nowMs - new Date(video.createdAt).getTime()) / (1e3 * 60 * 60));
@@ -1177,11 +1195,38 @@ function scoreCandidate(video, ctx, weights = DEFAULT_RANKING_WEIGHTS, nowMs = D
   const explorationDiversity = isUnwatchedTopic ? 0.85 : 0.3;
   const weighted = userInterestMatch * weights.userInterestMatch + topicLanguageMatch * weights.topicLanguageMatch + explicitFeedback * weights.explicitFeedback + predictedSatisfaction * weights.predictedSatisfaction + contentQualitySafety * weights.contentQualitySafety + creatorAffinity * weights.creatorAffinity + freshnessBoost * weights.freshnessBoost + explorationDiversity * weights.explorationDiversity;
   let finalScore = weighted * 100;
-  const isOtherLowViewNative = video.sourceType === "native" && video.views < 25 && (!ctx.userId || video.ownerUserId !== ctx.userId) && !ctx.subscribedChannelIds.has(video.channelId) && interestHits === 0 && !ctx.preferredCategories.includes(video.category) && !ctx.recentSearches.some((term) => term.length >= 2 && haystack.includes(term.toLowerCase()));
+  const isOtherLowViewNative = video.sourceType === "native" && video.views < 25 && (!ctx.userId || video.ownerUserId !== ctx.userId) && !isSubscribed && interestHits === 0 && !matchesPreferredCategory && !matchesRecentSearch;
   if (isOtherLowViewNative) {
     finalScore -= 24;
   }
-  return Number(Math.max(0, finalScore).toFixed(3));
+  const recommendationReasons = [];
+  if (isSubscribed) {
+    recommendationReasons.push("Subscribed creator");
+  }
+  if (ctx.personalizationEnabled && (topMatchedTopic || matchesPreferredCategory)) {
+    const topicLabel = topMatchedTopic || video.category;
+    recommendationReasons.push(`Matches your interest in ${topicLabel}`);
+  }
+  if (matchesRecentSearch) {
+    recommendationReasons.push("Matches your recent search");
+  }
+  if (matchesLanguage) {
+    recommendationReasons.push(`In your preferred language (${video.language})`);
+  }
+  if (ageHours <= 72) {
+    recommendationReasons.push("Fresh upload");
+  }
+  if (video.views >= 1e5 || video.isLive) {
+    recommendationReasons.push("Popular in India");
+  }
+  return {
+    score: Number(Math.max(0, finalScore).toFixed(3)),
+    recommendationReasons,
+    recommendationReason: recommendationReasons[0]
+  };
+}
+function scoreCandidate(video, ctx, weights = DEFAULT_RANKING_WEIGHTS, nowMs = Date.now()) {
+  return scoreCandidateWithReason(video, ctx, weights, nowMs).score;
 }
 function normalizeTitlePrefix(title) {
   if (!title) return "";
@@ -1238,10 +1283,15 @@ function generatePersonalizedRecommendations(candidates, ctx, opts) {
     seen.add(c.id);
     return true;
   });
-  const scored = unique.map((v) => ({
-    ...v,
-    score: scoreCandidate(v, ctx, opts?.weights ?? DEFAULT_RANKING_WEIGHTS, opts?.nowMs)
-  })).sort((a, b) => b.score - a.score);
+  const scored = unique.map((v) => {
+    const scoredRes = scoreCandidateWithReason(v, ctx, opts?.weights ?? DEFAULT_RANKING_WEIGHTS, opts?.nowMs);
+    return {
+      ...v,
+      score: scoredRes.score,
+      recommendationReasons: scoredRes.recommendationReasons,
+      recommendationReason: scoredRes.recommendationReason
+    };
+  }).sort((a, b) => b.score - a.score);
   const diversified = diversifyFeed(scored, 1, 2);
   const cursor = Math.max(0, opts?.cursor ?? 0);
   const limit = Math.max(1, Math.min(40, opts?.limit ?? 12));
@@ -1287,9 +1337,40 @@ function rankRelatedVideos(currentVideo, candidates, ctx) {
   });
   return diversifyFeed(sorted, 2, 3);
 }
-function rankShortsFeed(candidates, ctx, nowMs = Date.now()) {
-  const valid = candidates.filter((c) => c.isShort && validateContentCandidate(c, ctx.validation).valid);
-  const shortsWeights = {
+function rankShortsFeed(candidates, ctx, nowMs = Date.now(), opts) {
+  const mode = opts?.mode ?? "for_you";
+  const catFilter = (opts?.category ?? "All").trim();
+  let valid = candidates.filter((c) => c.isShort && validateContentCandidate(c, ctx.validation).valid);
+  if (catFilter && catFilter !== "All") {
+    const catNorm = catFilter.toLowerCase();
+    valid = valid.filter(
+      (c) => c.category.toLowerCase() === catNorm || c.tags.some((t) => t.toLowerCase() === catNorm)
+    );
+  }
+  if (mode === "following") {
+    valid = valid.filter((c) => ctx.subscribedChannelIds.has(c.channelId));
+  } else if (mode === "new_creators") {
+    valid = valid.filter((c) => c.subscriberCount < 25e4);
+  }
+  const shortsWeights = mode === "trending" ? {
+    userInterestMatch: 0.1,
+    topicLanguageMatch: 0.1,
+    explicitFeedback: 0.15,
+    predictedSatisfaction: 0.25,
+    contentQualitySafety: 0.2,
+    creatorAffinity: 0.05,
+    freshnessBoost: 0.1,
+    explorationDiversity: 0.05
+  } : mode === "new_creators" ? {
+    userInterestMatch: 0.2,
+    topicLanguageMatch: 0.15,
+    explicitFeedback: 0.15,
+    predictedSatisfaction: 0.15,
+    contentQualitySafety: 0.05,
+    creatorAffinity: 0.05,
+    freshnessBoost: 0.15,
+    explorationDiversity: 0.1
+  } : {
     userInterestMatch: 0.25,
     topicLanguageMatch: 0.15,
     explicitFeedback: 0.2,
@@ -1300,10 +1381,18 @@ function rankShortsFeed(candidates, ctx, nowMs = Date.now()) {
     explorationDiversity: 0.05
   };
   return diversifyFeed(
-    valid.map((v) => ({ ...v, _s: scoreCandidate(v, ctx, shortsWeights, nowMs) })).sort((a, b) => b._s - a._s),
+    valid.map((v) => {
+      const res = scoreCandidateWithReason(v, ctx, shortsWeights, nowMs);
+      return {
+        ...v,
+        _s: mode === "trending" ? res.score + Math.log10(Math.max(10, v.views)) * 12 : res.score,
+        recommendationReasons: res.recommendationReasons,
+        recommendationReason: res.recommendationReason
+      };
+    }).sort((a, b) => b._s - a._s),
     1,
     2
-  );
+  ).map(({ _s: _unused, ...rest }) => rest);
 }
 function resolveNextVideo(input) {
   if (input.mode === "repeat" && input.currentVideo) {
@@ -1330,37 +1419,89 @@ function resolveNextVideo(input) {
 }
 function buildConditionalSections(params) {
   const sections = [];
+  const usedIds = /* @__PURE__ */ new Set();
+  const takeUnique = (pool, limit = 4) => {
+    const out = [];
+    for (const v of pool) {
+      if (!v?.id || usedIds.has(v.id)) continue;
+      if (out.some((x) => x.id === v.id)) continue;
+      usedIds.add(v.id);
+      out.push(v);
+      if (out.length >= limit) break;
+    }
+    return out;
+  };
   if (params.continueWatching.length > 0) {
-    sections.push({
-      id: "continue_watching",
-      title: "Continue watching",
-      videos: params.continueWatching.slice(0, 4)
-    });
+    const items = takeUnique(params.continueWatching, 4);
+    if (items.length > 0) {
+      sections.push({
+        id: "continue_watching",
+        title: "Continue watching",
+        videos: items
+      });
+    }
   }
   if (params.subscribedVideos.length > 0) {
-    sections.push({
-      id: "from_subscriptions",
-      title: "From creators you follow",
-      videos: params.subscribedVideos.slice(0, 4)
-    });
+    const items = takeUnique(params.subscribedVideos, 4);
+    if (items.length > 0) {
+      sections.push({
+        id: "from_subscriptions",
+        title: "From creators you follow",
+        videos: items
+      });
+    }
   }
   if (params.topInterestTopic) {
+    const topicNorm = params.topInterestTopic.toLowerCase();
     const topicMatches = params.recommended.filter(
-      (v) => v.category.toLowerCase() === params.topInterestTopic.toLowerCase() || v.tags.some((t) => t.toLowerCase() === params.topInterestTopic.toLowerCase())
+      (v) => !usedIds.has(v.id) && (v.category.toLowerCase() === topicNorm || v.tags.some((t) => t.toLowerCase() === topicNorm))
     );
     if (topicMatches.length >= 2) {
+      const items = takeUnique(topicMatches, 4);
       sections.push({
         id: "interest_spotlight",
         title: `Because you follow ${params.topInterestTopic}`,
-        videos: topicMatches.slice(0, 4)
+        videos: items
+      });
+    }
+  }
+  const newCreatorPool = params.newCreators && params.newCreators.length > 0 ? params.newCreators : params.recommended.filter((v) => v.subscriberCount > 0 && v.subscriberCount < 25e4);
+  const diversifiedNewCreators = diversifyFeed(
+    newCreatorPool.filter((v) => !usedIds.has(v.id)),
+    1,
+    1
+  );
+  if (diversifiedNewCreators.length >= 2) {
+    const items = takeUnique(diversifiedNewCreators, 4);
+    if (items.length >= 2) {
+      sections.push({
+        id: "discover_new_creators",
+        title: "Discover new creators",
+        videos: items
+      });
+    }
+  }
+  if (params.preferredLanguage && params.preferredLanguage !== "All") {
+    const langNorm = params.preferredLanguage.toLowerCase();
+    const langMatches = params.recommended.filter(
+      (v) => !usedIds.has(v.id) && v.language.toLowerCase() === langNorm
+    );
+    if (langMatches.length >= 2) {
+      const items = takeUnique(langMatches, 4);
+      sections.push({
+        id: "popular_language",
+        title: `Popular in ${params.preferredLanguage}`,
+        videos: items
       });
     }
   }
   if (params.trending.length > 0) {
+    const freshTrending = takeUnique(params.trending, 4);
+    const items = freshTrending.length > 0 ? freshTrending : params.trending.slice(0, 4);
     sections.push({
       id: "trending_india",
       title: "Trending in India",
-      videos: params.trending.slice(0, 4)
+      videos: items
     });
   }
   return sections;
@@ -1612,11 +1753,12 @@ function recordBehaviorEvent(params) {
     timestamps.push(nowMs);
     isAnomaly = detectInteractionAnomaly(timestamps, 1e4, 16);
   }
-  db.prepare(`
-    INSERT INTO user_events (id, user_id, session_id, video_id, event_type, progress_pct, watch_duration_sec, metadata_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    `ev_${randomUUID().slice(0, 10)}`,
+  const cleanEventId = typeof params.eventId === "string" && params.eventId.trim().length > 0 ? params.eventId.trim().slice(0, 64) : `ev_${randomUUID().slice(0, 10)}`;
+  const info = db.prepare(`
+      INSERT OR IGNORE INTO user_events (id, user_id, session_id, video_id, event_type, progress_pct, watch_duration_sec, metadata_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+    cleanEventId,
     params.userId ?? null,
     params.sessionId || "",
     params.videoId,
@@ -1626,13 +1768,16 @@ function recordBehaviorEvent(params) {
     JSON.stringify({ ...params.metadata ?? {}, anomaly: isAnomaly }),
     nowIso
   );
-  if (!params.userId || isAnomaly) return { recorded: true, anomaly: isAnomaly };
+  if (info.changes === 0) {
+    return { recorded: true, deduplicated: true, anomaly: false };
+  }
+  if (!params.userId || isAnomaly) return { recorded: true, deduplicated: false, anomaly: isAnomaly };
   const prefs = getUserPreferencesPayload(params.userId);
-  if (!prefs.personalizationEnabled) return { recorded: true, anomaly: false };
+  if (!prefs.personalizationEnabled) return { recorded: true, deduplicated: false, anomaly: false };
   const delta = computeInterestDelta(params.eventType);
-  if (delta === 0) return { recorded: true, anomaly: false };
+  if (delta === 0) return { recorded: true, deduplicated: false, anomaly: false };
   const vidRow = db.prepare("SELECT category, tags_json FROM videos WHERE id = ?").get(params.videoId);
-  if (!vidRow) return { recorded: true, anomaly: false };
+  if (!vidRow) return { recorded: true, deduplicated: false, anomaly: false };
   const topics = /* @__PURE__ */ new Set([vidRow.category]);
   try {
     const parsedTags = JSON.parse(vidRow.tags_json || "[]");
@@ -1654,7 +1799,22 @@ function recordBehaviorEvent(params) {
     const nextScore = applyInterestDecayAndDelta(baseScore, topic === vidRow.category ? delta : delta * 0.5, days);
     upsertInterest.run(params.userId, topic, nextScore, nowIso);
   }
-  return { recorded: true, anomaly: false };
+  return { recorded: true, deduplicated: false, anomaly: false };
+}
+function recordBehaviorEventBatch(events) {
+  let recorded = 0;
+  let deduplicated = 0;
+  let skipped = 0;
+  for (const ev of events) {
+    if (!ev?.videoId || !ev?.eventType) {
+      skipped += 1;
+      continue;
+    }
+    const res = recordBehaviorEvent(ev);
+    if (res.deduplicated) deduplicated += 1;
+    else recorded += 1;
+  }
+  return { recorded, deduplicated, skipped, total: events.length };
 }
 function getRelatedCandidatePool(currentVideo, ctx, extraExternal = []) {
   const native = getAllNativeCandidates();
@@ -1979,7 +2139,11 @@ var CURATED_RSS_CHANNELS = [
   { id: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee", handle: "@mkbhd", category: "Technology", language: "English" }
 ];
 function decodeXmlEntities(str) {
-  return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/&#x2F;/g, "/");
+  return str.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/&#x2F;/g, "/").replace(/&nbsp;/g, " ");
+}
+function cleanHtmlText(str) {
+  if (!str) return "";
+  return decodeXmlEntities(str).replace(/<br\s*\/?>/gi, " ").replace(/<\/(p|div|li|h[1-6])>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 function extractXmlTag(block, tagName) {
   const escaped = tagName.replace(/[:]/g, "\\:");
@@ -1993,10 +2157,10 @@ function parseAtomRssFeed(xml, meta) {
     const vid = extractXmlTag(entry, "yt:videoId");
     if (!vid) continue;
     const rawChId = extractXmlTag(entry, "yt:channelId") || meta.channelId;
-    const title = extractXmlTag(entry, "title") || "Featured Video";
+    const title = cleanHtmlText(extractXmlTag(entry, "title")) || "Featured Video";
     const authorName = extractXmlTag(entry, "name") || meta.channelName || "Creator Channel";
     const published = extractXmlTag(entry, "published") || (/* @__PURE__ */ new Date()).toISOString();
-    const description = extractXmlTag(entry, "media:description") || "";
+    const description = cleanHtmlText(extractXmlTag(entry, "media:description") || "");
     const linkMatch = entry.match(/<link[^>]+rel=["']alternate["'][^>]+href=["']([^"']+)["']/i);
     const altHref = linkMatch?.[1] || "";
     const thumbMatch = entry.match(/<media:thumbnail[^>]+url=["']([^"']+)["']/i);
@@ -2127,7 +2291,7 @@ function mapDailymotionItem(item, opts) {
   if (!item.id || !item.title) return null;
   const durationSec = Math.max(0, Math.round(Number(item.duration || 0)));
   const ownerUsername = (item["owner.username"] || "dailymotion").replace(/[^a-zA-Z0-9_-]/g, "") || "creator";
-  const ownerName = item["owner.screenname"] || ownerUsername;
+  const ownerName = cleanHtmlText(item["owner.screenname"] || ownerUsername);
   const tags = Array.isArray(item.tags) ? item.tags.slice(0, 10) : [];
   const isShort = Boolean(opts?.forceShort) || durationSec > 0 && durationSec <= 90 || /#shorts?\b/i.test(item.title) || tags.some((t) => /^shorts?$/i.test(t));
   const mappedCat = opts?.category && opts.category !== "All" ? opts.category === "Mixes" ? "Music" : opts.category : DM_CHANNEL_CATEGORY_MAP[String(item.channel || "").toLowerCase()] || "Entertainment";
@@ -2138,8 +2302,8 @@ function mapDailymotionItem(item, opts) {
   const videoId = `dm_${item.id}`;
   const result = {
     id: videoId,
-    title: item.title,
-    description: (item.description || "").slice(0, 1e3),
+    title: cleanHtmlText(item.title),
+    description: cleanHtmlText(item.description || "").slice(0, 1e3),
     tags: tags.length > 0 ? tags : [mappedCat, mappedLang],
     category: mappedCat,
     language: mappedLang,
@@ -2485,7 +2649,7 @@ async function fetchExternalFeedPaged(params) {
           sort: "trending"
         }) : Promise.resolve({ items: [], nextPage: null })
       ]);
-      const combined2 = interleaveProviders(rssShorts, dmShorts.items);
+      const combined2 = interleaveProviders(dmShorts.items, rssShorts);
       const nextToken2 = dmShorts.nextPage ? `dm_p${dmShorts.nextPage}` : null;
       const payload2 = { items: combined2, nextPageToken: nextToken2 };
       if (combined2.length > 0) setCached(cacheKey, payload2, FEED_CACHE_TTL_MS);
@@ -2879,12 +3043,15 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
       const subscribedVideos = subscribedRows.map(hydrateVideoRow).map(toCandidate).filter((v) => validateContentCandidate(v, ctx.validation).valid);
       const topInterestTopic = Object.entries(ctx.interestScores).sort((a, b) => b[1] - a[1])[0]?.[0];
       const trending = rankTrendingIndia(pool, ctx.validation);
+      const newCreators = pool.filter((v) => !v.isShort && v.subscriberCount < 25e4);
       sections = buildConditionalSections({
         recommended: rec.items,
         continueWatching,
         trending,
         subscribedVideos,
-        topInterestTopic
+        topInterestTopic,
+        preferredLanguage: ctx.preferredLanguages[0],
+        newCreators
       });
     }
     res.status(200).json({
@@ -2918,24 +3085,55 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
   }));
   app2.get("/api/recommendations/shorts", asyncRoute(async (req, res) => {
     const language = String(req.query.language || "All");
+    const category = String(req.query.category || "All");
+    const feedRaw = String(req.query.feed || "for_you");
+    const mode = ["for_you", "following", "trending", "new_creators"].includes(feedRaw) ? feedRaw : "for_you";
     const pageToken = String(req.query.pageToken || "").trim();
     const ctx = buildUserAiContext(req.auth?.userId);
+    if (mode === "following" && !req.auth) {
+      res.json({
+        videos: [],
+        nextPageToken: null,
+        hasMore: false,
+        followingRequiresAuth: true,
+        discoveryStatus: getDiscoveryStatus()
+      });
+      return;
+    }
     const native = pageToken === "" ? filterAndSortVideos(
       getAllNativeCandidates().filter((v) => v.isShort),
-      { language }
+      { language, category }
     ) : [];
     const topTopics = Object.entries(ctx.interestScores).sort((a, b) => b[1] - a[1]).map(([topic]) => topic).slice(0, 5);
     const seed = Number(req.query.seed || 0) || Math.floor(Date.now() / (5 * 60 * 1e3)) % 12;
-    const extPaged = await fetchExternalFeedPaged({
+    let subscribedShorts = [];
+    if (mode === "following" && req.auth && pageToken === "") {
+      const subRows = db.prepare(`
+          SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
+                 c.verified as channel_verified, c.subscriber_count
+          FROM videos v
+          JOIN channels c ON c.id = v.channel_id
+          JOIN subscriptions s ON s.channel_id = c.id
+          WHERE s.user_id = ? AND v.visibility = 'public' AND v.status = 'published' AND v.is_short = 1
+          ORDER BY v.created_at DESC
+        `).all(req.auth.userId);
+      subscribedShorts = subRows.map(hydrateVideoRow).map(toCandidate);
+    }
+    const extPaged = mode === "following" ? { items: [], nextPageToken: null } : await fetchExternalFeedPaged({
       shorts: true,
+      category,
       language,
+      trending: mode === "trending",
       pageToken,
       interestTopics: topTopics,
       recentSearches: ctx.recentSearches,
       preferredLanguage: ctx.preferredLanguages[0],
       refreshSeed: seed
     });
-    const ranked = rankShortsFeed([...native, ...extPaged.items.map(toCandidate)], ctx);
+    const ranked = rankShortsFeed([...subscribedShorts, ...native, ...extPaged.items.map(toCandidate)], ctx, Date.now(), {
+      mode,
+      category
+    });
     res.json({
       videos: ranked,
       nextPageToken: extPaged.nextPageToken,
@@ -3022,14 +3220,15 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
     const fromPool = related.find((v) => v.id === resolution.nextVideoId);
     res.json({ nextVideo: fromPool ?? null, source: resolution.source });
   }));
-  app2.post("/api/events/watch", rateLimit(120, 6e4), async (req, res) => {
-    const { videoId, eventType, progressPct = 0, watchDurationSec = 0, sessionId = "" } = req.body;
+  app2.post("/api/events/watch", rateLimit(120, 6e4), asyncRoute(async (req, res) => {
+    const { eventId, videoId, eventType, progressPct = 0, watchDurationSec = 0, sessionId = "" } = req.body ?? {};
     if (!videoId || !eventType) {
       res.status(400).json({ error: "videoId and eventType required." });
       return;
     }
     await ensureExternalVideoRecord2(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth?.userId,
       sessionId,
       videoId,
@@ -3038,52 +3237,79 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
       watchDurationSec
     });
     res.json(result);
-  });
-  app2.post("/api/events/skip", rateLimit(120, 6e4), async (req, res) => {
-    const { videoId, watchDurationSec = 0 } = req.body;
+  }));
+  app2.post("/api/events/batch", rateLimit(60, 6e4), asyncRoute(async (req, res) => {
+    const { events = [] } = req.body ?? {};
+    if (!Array.isArray(events) || events.length === 0) {
+      res.status(400).json({ error: "events array is required." });
+      return;
+    }
+    const bounded = events.slice(0, 50).filter((e) => e && typeof e.videoId === "string" && typeof e.eventType === "string");
+    const uniqueVideoIds = Array.from(new Set(bounded.map((e) => e.videoId))).slice(0, 20);
+    for (const vid of uniqueVideoIds) {
+      await ensureExternalVideoRecord2(vid);
+    }
+    const prepared = bounded.map((e) => ({
+      eventId: e.eventId,
+      userId: req.auth?.userId,
+      sessionId: e.sessionId,
+      videoId: e.videoId,
+      eventType: e.eventType,
+      progressPct: e.progressPct,
+      watchDurationSec: e.watchDurationSec,
+      metadata: e.surface ? { ...e.metadata ?? {}, surface: e.surface } : e.metadata
+    }));
+    const result = recordBehaviorEventBatch(prepared);
+    res.json({ ok: true, ...result });
+  }));
+  app2.post("/api/events/skip", rateLimit(120, 6e4), asyncRoute(async (req, res) => {
+    const { eventId, videoId, watchDurationSec = 0 } = req.body ?? {};
     if (!videoId) {
       res.status(400).json({ error: "videoId required." });
       return;
     }
     await ensureExternalVideoRecord2(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth?.userId,
       videoId,
       eventType: "skip",
       watchDurationSec
     });
     res.json(result);
-  });
-  app2.post("/api/events/like", requireAuth, async (req, res) => {
-    const { videoId, reaction = "like" } = req.body;
+  }));
+  app2.post("/api/events/like", requireAuth, asyncRoute(async (req, res) => {
+    const { eventId, videoId, reaction = "like" } = req.body ?? {};
     if (!videoId) {
       res.status(400).json({ error: "videoId required." });
       return;
     }
     await ensureExternalVideoRecord2(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth.userId,
       videoId,
       eventType: reaction === "dislike" ? "dislike" : "like"
     });
     res.json(result);
-  });
-  app2.post("/api/events/share", rateLimit(60, 6e4), async (req, res) => {
-    const { videoId } = req.body;
+  }));
+  app2.post("/api/events/share", rateLimit(60, 6e4), asyncRoute(async (req, res) => {
+    const { eventId, videoId } = req.body ?? {};
     if (!videoId) {
       res.status(400).json({ error: "videoId required." });
       return;
     }
     await ensureExternalVideoRecord2(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth?.userId,
       videoId,
       eventType: "share"
     });
     res.json(result);
-  });
-  app2.post("/api/events/feedback", requireAuth, async (req, res) => {
-    const { videoId, channelId, feedbackType, reason = "" } = req.body;
+  }));
+  app2.post("/api/events/feedback", requireAuth, asyncRoute(async (req, res) => {
+    const { videoId, channelId, feedbackType, reason = "" } = req.body ?? {};
     if (!feedbackType || !["not_interested", "dont_recommend_creator"].includes(feedbackType)) {
       res.status(400).json({ error: "Invalid feedbackType." });
       return;
@@ -3109,9 +3335,9 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
       });
     }
     res.json({ ok: true });
-  });
-  app2.post("/api/recommendations/impression", rateLimit(200, 6e4), (req, res) => {
-    const { videoIds = [], surface = "home" } = req.body;
+  }));
+  app2.post("/api/recommendations/impression", rateLimit(200, 6e4), asyncRoute((req, res) => {
+    const { videoIds = [], surface = "home" } = req.body ?? {};
     const stmt = db.prepare(`
       INSERT INTO recommendation_impressions (id, user_id, video_id, surface, position, score, clicked, created_at)
       VALUES (?, ?, ?, ?, ?, 0, 0, ?)
@@ -3123,9 +3349,9 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
       }
     });
     res.json({ ok: true });
-  });
-  app2.post("/api/recommendations/click", rateLimit(120, 6e4), (req, res) => {
-    const { videoId, surface = "home" } = req.body;
+  }));
+  app2.post("/api/recommendations/click", rateLimit(120, 6e4), asyncRoute((req, res) => {
+    const { videoId, surface = "home", eventId } = req.body ?? {};
     if (!videoId) {
       res.status(400).json({ error: "videoId required." });
       return;
@@ -3136,9 +3362,9 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
         WHERE user_id = ? AND video_id = ? AND surface = ?
       `).run(req.auth.userId, videoId, surface);
     }
-    recordBehaviorEvent({ userId: req.auth?.userId, videoId, eventType: "click" });
+    recordBehaviorEvent({ eventId, userId: req.auth?.userId, videoId, eventType: "click", metadata: { surface } });
     res.json({ ok: true });
-  });
+  }));
   app2.get("/api/preferences", requireAuth, (req, res) => {
     const uid = req.auth.userId;
     const preferences = getUserPreferencesPayload(uid);
@@ -3407,8 +3633,8 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
       topTopics
     });
   });
-  app2.post("/api/ai/chat", rateLimit(30, 6e4), async (req, res) => {
-    const { message, history = [], role = "general" } = req.body;
+  app2.post("/api/ai/chat", rateLimit(30, 6e4), asyncRoute(async (req, res) => {
+    const { message, history = [], role = "general", videoContext } = req.body ?? {};
     const cleanMessage = typeof message === "string" ? message.trim() : "";
     if (!cleanMessage) {
       res.status(400).json({ error: "Please enter a message." });
@@ -3433,7 +3659,9 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
     const model = selectedRole === "fast" ? "gemini-3.1-flash-lite" : "gemini-4-hydrogen";
     const ctx = buildUserAiContext(req.auth?.userId);
     const userTopics = Object.entries(ctx.interestScores).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t]) => t);
-    const contextSuffix = userTopics.length > 0 ? ` The current viewer follows topics: ${userTopics.join(", ")} (languages: ${ctx.preferredLanguages.join(", ")}).` : "";
+    const topicSuffix = userTopics.length > 0 ? ` The current viewer follows topics: ${userTopics.join(", ")} (languages: ${ctx.preferredLanguages.join(", ")}).` : "";
+    const safeVideoMeta = videoContext && typeof videoContext.title === "string" && videoContext.title.trim() ? ` Active video metadata only (you cannot see the video frames or audio stream\u2014state this limitation clearly if asked about visual/spoken details not in metadata): Title="${videoContext.title.trim().slice(0, 180)}", Channel="${String(videoContext.channelName || "").slice(0, 80)}", Category="${String(videoContext.category || "").slice(0, 60)}", Language="${String(videoContext.language || "").slice(0, 40)}", Description="${String(videoContext.description || "").slice(0, 400)}".` : "";
+    const contextSuffix = `${topicSuffix}${safeVideoMeta}`;
     const normalizedHistory = Array.isArray(history) ? history.slice(-20).filter((turn) => typeof turn?.text === "string" && turn.text.trim().length > 0).map((turn) => ({
       role: turn.role === "model" ? "model" : "user",
       parts: [{ text: turn.text.trim().slice(0, 2e3) }]
@@ -3485,7 +3713,7 @@ function registerAiAndLibraryRoutes(app2, ensureExternalVideoRecord2) {
       console.error("Gemini chat error:", friendly);
       res.status(502).json({ error: friendly });
     }
-  });
+  }));
 }
 
 // server/firebaseAdmin.ts
@@ -4181,8 +4409,8 @@ app.get("/api/auth/check-username", (req, res) => {
     suggestions: suggestions.slice(0, 5)
   });
 });
-app.post("/api/auth/register", rateLimit(20, 6e4), (req, res) => {
-  const { name, email, birthday = "", password, username, avatarDataUrl = "", interests = [] } = req.body;
+app.post("/api/auth/register", rateLimit(20, 6e4), asyncRoute2((req, res) => {
+  const { name, email, birthday = "", password, username, avatarDataUrl = "", interests = [] } = req.body ?? {};
   const cleanName = (name || "").trim();
   const cleanEmail = (email || "").trim().toLowerCase();
   const rawHandle = (username || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9_]/g, "");
@@ -4245,9 +4473,9 @@ app.post("/api/auth/register", rateLimit(20, 6e4), (req, res) => {
   setSessionCookie(res, token, req);
   logAudit(userId, "ACCOUNT_REGISTERED", "user", userId, { email: cleanEmail, handle });
   res.status(201).json({ user: getUserPayload(userId), token });
-});
-app.post("/api/auth/login", rateLimit(25, 6e4), (req, res) => {
-  const { identifier, password } = req.body;
+}));
+app.post("/api/auth/login", rateLimit(25, 6e4), asyncRoute2((req, res) => {
+  const { identifier, password } = req.body ?? {};
   const cleanId = (identifier || "").trim().toLowerCase();
   if (!cleanId || !password) {
     res.status(400).json({ error: "Email or username and password are required." });
@@ -4278,7 +4506,7 @@ app.post("/api/auth/login", rateLimit(25, 6e4), (req, res) => {
   setSessionCookie(res, token, req);
   logAudit(row.id, "PASSWORD_LOGIN", "user", row.id, { email: row.email });
   res.json({ user: getUserPayload(row.id), token });
-});
+}));
 app.post("/api/auth/avatar", requireAuth, (req, res) => {
   const { avatarDataUrl } = req.body;
   if (!avatarDataUrl || !/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(avatarDataUrl) || avatarDataUrl.length > 6e5) {
@@ -4791,9 +5019,11 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
     language = "All",
     sort = "relevance",
     duration = "all",
+    uploadDate = "any",
     pageToken = ""
   } = req.query;
   const cleanToken = (pageToken || "").trim();
+  const validUploadDate = ["any", "today", "week", "month"].includes(uploadDate) ? uploadDate : "any";
   let nativeMatches = [];
   let channelMatches = [];
   if (!cleanToken) {
@@ -4810,7 +5040,8 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
       category,
       language,
       sort,
-      duration
+      duration,
+      uploadDate: validUploadDate
     });
     channelMatches = q.trim() ? db.prepare(`
           SELECT id, name, handle, description, avatar_url as avatarUrl, verified, subscriber_count as subscriberCount
@@ -4822,6 +5053,7 @@ app.get("/api/search", asyncRoute2(async (req, res) => {
   const extPaged = q.trim() ? await fetchExternalDiscoveryPaged(q, language, cleanToken) : await fetchExternalFeedPaged({ category, language, pageToken: cleanToken });
   const externalMatches = filterAndSortVideos(extPaged.items, {
     duration,
+    uploadDate: validUploadDate,
     sort
   });
   const combined = [...nativeMatches, ...externalMatches];
@@ -5063,11 +5295,7 @@ app.post("/api/channels/:id/subscribe", requireAuth, asyncRoute2(async (req, res
 }));
 app.get("/api/subscriptions", (req, res) => {
   if (!req.auth) {
-    const featuredChannels = db.prepare(`
-      SELECT id, name, handle, avatar_url as avatarUrl, verified, subscriber_count as subscriberCount
-      FROM channels ORDER BY subscriber_count DESC LIMIT 7
-    `).all();
-    res.json({ channels: featuredChannels, videos: [] });
+    res.json({ channels: [], videos: [] });
     return;
   }
   const channels = db.prepare(`
@@ -5435,7 +5663,8 @@ app.use((err, req, res, next) => {
     next(err);
     return;
   }
-  if (req.path.startsWith("/api")) {
+  const url = req.originalUrl || req.url || req.path || "";
+  if (req.path.startsWith("/api") || url.startsWith("/api")) {
     const msg = err instanceof Error ? err.message : "Unexpected server error";
     console.error("API Error:", msg);
     res.status(500).json({ error: msg });

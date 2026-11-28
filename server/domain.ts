@@ -192,11 +192,14 @@ export interface SearchFilterOptions {
   language?: string;
   sort?: 'relevance' | 'date' | 'views';
   duration?: 'all' | 'short' | 'medium' | 'long';
+  uploadDate?: 'any' | 'today' | 'week' | 'month';
+  nowMs?: number;
 }
 
 export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: SearchFilterOptions): T[] {
   const q = (opts.query ?? '').trim().toLowerCase();
   const terms = q ? q.split(/\s+/).filter(Boolean) : [];
+  const refNowMs = opts.nowMs ?? Date.now();
 
   const filtered = videos.filter((v) => {
     if (opts.category && opts.category !== 'All') {
@@ -220,6 +223,17 @@ export function filterAndSortVideos<T extends RankableVideo>(videos: T[], opts: 
       if (opts.duration === 'short' && v.durationSec >= 240) return false;
       if (opts.duration === 'medium' && (v.durationSec < 240 || v.durationSec > 1200)) return false;
       if (opts.duration === 'long' && v.durationSec <= 1200) return false;
+    }
+
+    if (opts.uploadDate && opts.uploadDate !== 'any') {
+      const createdMs = new Date(v.createdAt).getTime();
+      if (!Number.isNaN(createdMs)) {
+        const diffMs = Math.max(0, refNowMs - createdMs);
+        const dayMs = 24 * 60 * 60 * 1000;
+        if (opts.uploadDate === 'today' && diffMs > dayMs) return false;
+        if (opts.uploadDate === 'week' && diffMs > 7 * dayMs) return false;
+        if (opts.uploadDate === 'month' && diffMs > 30 * dayMs) return false;
+      }
     }
 
     if (terms.length > 0) {

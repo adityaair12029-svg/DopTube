@@ -52,6 +52,8 @@ export interface VideoItem {
   userReaction?: 'like' | 'dislike' | null;
   isSubscribed?: boolean;
   inWatchLater?: boolean;
+  recommendationReason?: string;
+  recommendationReasons?: string[];
 }
 
 export interface UserPreferences {

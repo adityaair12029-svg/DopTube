@@ -315,7 +315,8 @@ export function toCandidate(item: HydratedVideoRow | DiscoveryResult): Candidate
   };
 }
 
-export function recordBehaviorEvent(params: {
+export interface BehaviorEventInput {
+  eventId?: string;
   userId?: string;
   sessionId?: string;
   videoId: string;
@@ -323,7 +324,9 @@ export function recordBehaviorEvent(params: {
   progressPct?: number;
   watchDurationSec?: number;
   metadata?: Record<string, unknown>;
-}) {
+}
+
+export function recordBehaviorEvent(params: BehaviorEventInput) {
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
   let isAnomaly = false;
@@ -337,34 +340,45 @@ export function recordBehaviorEvent(params: {
     isAnomaly = detectInteractionAnomaly(timestamps, 10_000, 16);
   }
 
-  db.prepare(`
-    INSERT INTO user_events (id, user_id, session_id, video_id, event_type, progress_pct, watch_duration_sec, metadata_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    `ev_${randomUUID().slice(0, 10)}`,
-    params.userId ?? null,
-    params.sessionId || '',
-    params.videoId,
-    params.eventType,
-    Math.max(0, Math.min(100, Math.round(params.progressPct ?? 0))),
-    Math.max(0, Math.round(params.watchDurationSec ?? 0)),
-    JSON.stringify({ ...(params.metadata ?? {}), anomaly: isAnomaly }),
-    nowIso
-  );
+  const cleanEventId =
+    typeof params.eventId === 'string' && params.eventId.trim().length > 0
+      ? params.eventId.trim().slice(0, 64)
+      : `ev_${randomUUID().slice(0, 10)}`;
 
-  if (!params.userId || isAnomaly) return { recorded: true, anomaly: isAnomaly };
+  const info = db
+    .prepare(`
+      INSERT OR IGNORE INTO user_events (id, user_id, session_id, video_id, event_type, progress_pct, watch_duration_sec, metadata_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      cleanEventId,
+      params.userId ?? null,
+      params.sessionId || '',
+      params.videoId,
+      params.eventType,
+      Math.max(0, Math.min(100, Math.round(params.progressPct ?? 0))),
+      Math.max(0, Math.round(params.watchDurationSec ?? 0)),
+      JSON.stringify({ ...(params.metadata ?? {}), anomaly: isAnomaly }),
+      nowIso
+    );
+
+  if (info.changes === 0) {
+    return { recorded: true, deduplicated: true, anomaly: false };
+  }
+
+  if (!params.userId || isAnomaly) return { recorded: true, deduplicated: false, anomaly: isAnomaly };
 
   const prefs = getUserPreferencesPayload(params.userId);
-  if (!prefs.personalizationEnabled) return { recorded: true, anomaly: false };
+  if (!prefs.personalizationEnabled) return { recorded: true, deduplicated: false, anomaly: false };
 
   const delta = computeInterestDelta(params.eventType);
-  if (delta === 0) return { recorded: true, anomaly: false };
+  if (delta === 0) return { recorded: true, deduplicated: false, anomaly: false };
 
   const vidRow = db
     .prepare('SELECT category, tags_json FROM videos WHERE id = ?')
     .get(params.videoId) as { category: string; tags_json: string } | undefined;
 
-  if (!vidRow) return { recorded: true, anomaly: false };
+  if (!vidRow) return { recorded: true, deduplicated: false, anomaly: false };
 
   const topics = new Set<string>([vidRow.category]);
   try {
@@ -393,7 +407,23 @@ export function recordBehaviorEvent(params: {
     upsertInterest.run(params.userId, topic, nextScore, nowIso);
   }
 
-  return { recorded: true, anomaly: false };
+  return { recorded: true, deduplicated: false, anomaly: false };
+}
+
+export function recordBehaviorEventBatch(events: BehaviorEventInput[]) {
+  let recorded = 0;
+  let deduplicated = 0;
+  let skipped = 0;
+  for (const ev of events) {
+    if (!ev?.videoId || !ev?.eventType) {
+      skipped += 1;
+      continue;
+    }
+    const res = recordBehaviorEvent(ev);
+    if (res.deduplicated) deduplicated += 1;
+    else recorded += 1;
+  }
+  return { recorded, deduplicated, skipped, total: events.length };
 }
 
 export function getRelatedCandidatePool(currentVideo: CandidateVideo, ctx: UserAiContext, extraExternal: DiscoveryResult[] = []): CandidateVideo[] {

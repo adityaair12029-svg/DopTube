@@ -466,4 +466,65 @@ test('createSqlJsCompatDatabase initializes schema in pure JS and runs queries w
   assert.equal(row?.preferred_language, 'Hindi');
 });
 
+test('filterAndSortVideos applies uploadDate window (today, week, month) relative to nowMs', () => {
+  const nowMs = new Date('2026-11-28T12:00:00Z').getTime();
+  const baseVideo = (id: string, createdAt: string): RankableVideo => ({
+    id,
+    title: `Video ${id}`,
+    description: 'Testing upload date filter',
+    tags: ['test'],
+    category: 'Education',
+    language: 'Hindi',
+    channelId: 'ch_test',
+    views: 1000,
+    likes: 50,
+    createdAt,
+    isShort: false,
+    isLive: false,
+    visibility: 'public',
+    durationSec: 300,
+  });
 
+  const pool = [
+    baseVideo('today_v', '2026-11-28T06:00:00Z'),
+    baseVideo('week_v', '2026-11-24T12:00:00Z'),
+    baseVideo('month_v', '2026-11-05T12:00:00Z'),
+    baseVideo('old_v', '2026-09-01T12:00:00Z'),
+  ];
+
+  assert.deepEqual(
+    filterAndSortVideos(pool, { uploadDate: 'today', nowMs }).map((v) => v.id),
+    ['today_v']
+  );
+  assert.deepEqual(
+    filterAndSortVideos(pool, { uploadDate: 'week', nowMs }).map((v) => v.id),
+    ['today_v', 'week_v']
+  );
+  assert.deepEqual(
+    filterAndSortVideos(pool, { uploadDate: 'month', nowMs }).map((v) => v.id),
+    ['today_v', 'week_v', 'month_v']
+  );
+  assert.equal(filterAndSortVideos(pool, { uploadDate: 'any', nowMs }).length, 4);
+});
+
+test('mapDailymotionItem decodes HTML entities and tags cleanly in metadata', () => {
+  const mapped = mapDailymotionItem({
+    id: 'x9html1',
+    title: 'ISRO &amp; Rocket Science &#39;India&#39; Explained',
+    description: '&lt;p&gt;Live launch &amp; orbit mechanics&lt;/p&gt;',
+    thumbnail_720_url: 'https://s1.dmcdn.net/v/html/720.jpg',
+    duration: 320,
+    views_total: 25000,
+    likes_total: 900,
+    created_time: 1764000000,
+    language: 'en',
+    channel: 'tech',
+    'owner.username': 'SpaceIN',
+    'owner.screenname': 'Space &amp; Science IN',
+    tags: ['isro', 'space'],
+  });
+  assert.ok(mapped);
+  assert.equal(mapped.title, "ISRO & Rocket Science 'India' Explained");
+  assert.equal(mapped.channelName, 'Space & Science IN');
+  assert.equal(mapped.description.includes('&amp;'), false);
+});

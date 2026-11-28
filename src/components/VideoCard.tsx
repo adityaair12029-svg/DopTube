@@ -5,6 +5,7 @@ import {
   Clock,
   EyeOff,
   Flag,
+  Info,
   ListMusic,
   ListPlus,
   MoreVertical,
@@ -12,6 +13,7 @@ import {
   Play,
   Radio,
   Share2,
+  X,
   Zap,
 } from 'lucide-react';
 import type { VideoItem } from '../types';
@@ -49,6 +51,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   onDontRecommendCreator,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reasonOpen, setReasonOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -138,7 +141,20 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         <MoreVertical className="w-4 h-4" />
       </button>
       {menuOpen && (
-        <div className="absolute right-0 top-9 w-56 rounded-xl bg-white dark:bg-[#16181c] border border-[#e5e7eb] dark:border-[#2f3336] shadow-2xl py-1.5 z-40 text-sm">
+        <div className="absolute right-0 top-9 w-56 rounded-xl bg-[var(--dt-surface)] border border-[var(--dt-border)] shadow-2xl py-1.5 z-40 text-sm">
+          {video.recommendationReason && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                setReasonOpen((v) => !v);
+              }}
+              className="w-full px-3.5 py-2 text-left flex items-center gap-3 hover:bg-[var(--dt-surface-hover)] cursor-pointer text-[#1d4ed8] dark:text-[#38bdf8] font-medium"
+            >
+              <Info className="w-4 h-4 shrink-0" />
+              <span>Why this video?</span>
+            </button>
+          )}
           {onPlayNext && (
             <button
               type="button"
@@ -362,9 +378,30 @@ export const VideoCard: React.FC<VideoCardProps> = ({
             {video.channelVerified && <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-[#1d4ed8] dark:text-[#38bdf8]" />}
           </button>
 
-          <p className="text-[13px] text-[#536471] dark:text-[#71767b] font-mono-nums">
+          <p className="text-[13px] text-[var(--dt-text-muted)] font-mono-nums">
             {formatViews(video.views)} views · {video.isLive ? 'Streaming live' : formatRelativeTime(video.createdAt)}
           </p>
+
+          {reasonOpen && video.recommendationReason && (
+            <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-[var(--dt-surface)] border border-[var(--dt-border)] text-xs text-[var(--dt-text)] flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <span className="font-semibold text-[#1d4ed8] dark:text-[#38bdf8]">Why recommended: </span>
+                <span>
+                  {video.recommendationReasons && video.recommendationReasons.length > 0
+                    ? video.recommendationReasons.slice(0, 2).join(' · ')
+                    : video.recommendationReason}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReasonOpen(false)}
+                aria-label="Dismiss recommendation reason"
+                className="p-0.5 rounded hover:bg-[var(--dt-surface-hover)] shrink-0 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
 
         {actionMenu}

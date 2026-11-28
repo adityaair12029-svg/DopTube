@@ -9,6 +9,7 @@ import {
   rankShortsFeed,
   rankTrendingIndia,
   resolveNextVideo,
+  scoreCandidateWithReason,
   type CandidateVideo,
   type UserAiContext,
 } from './recommendation';
@@ -289,4 +290,93 @@ test('rankRelatedVideos enforces creator diversity and excludes Shorts; rankShor
   assert.equal(shortsOnly.length, 2);
   assert.ok(shortsOnly.every((v) => v.isShort));
 });
+
+test('scoreCandidateWithReason produces signal-grounded reasons and Shorts modes filter accurately', () => {
+  const nowMs = new Date('2026-11-28T12:00:00Z').getTime();
+  const ctx = makeAiContext({
+    preferredCategories: ['Technology'],
+    interestScores: { Technology: 95, Physics: 70 },
+    subscribedChannelIds: new Set(['ch_sub']),
+    preferredLanguages: ['Hindi'],
+    recentSearches: ['kubernetes'],
+  });
+
+  const subTechVideo = makeCandidate({
+    id: 'v_sub_k8s',
+    title: 'Kubernetes in Hindi',
+    category: 'Technology',
+    language: 'Hindi',
+    channelId: 'ch_sub',
+    tags: ['kubernetes', 'tech'],
+    subscriberCount: 500_000,
+    isShort: true,
+    durationSec: 40,
+    createdAt: '2026-11-28T10:00:00Z',
+  });
+
+  const scored = scoreCandidateWithReason(subTechVideo, ctx, undefined, nowMs);
+  assert.ok(scored.recommendationReasons.includes('Subscribed creator'));
+  assert.ok(scored.recommendationReasons.includes('Matches your recent search'));
+  assert.ok(scored.recommendationReasons.some((r) => r.includes('Technology')));
+  assert.equal(scored.recommendationReason, scored.recommendationReasons[0]);
+
+  const smallCreatorShort = makeCandidate({
+    id: 'short_small',
+    category: 'Music',
+    language: 'Tamil',
+    channelId: 'ch_indie',
+    subscriberCount: 15_000,
+    views: 800,
+    isShort: true,
+    durationSec: 32,
+  });
+
+  const followingFeed = rankShortsFeed([subTechVideo, smallCreatorShort], ctx, nowMs, { mode: 'following' });
+  assert.deepEqual(
+    followingFeed.map((v) => v.id),
+    ['v_sub_k8s']
+  );
+
+  const newCreatorFeed = rankShortsFeed([subTechVideo, smallCreatorShort], ctx, nowMs, { mode: 'new_creators' });
+  assert.deepEqual(
+    newCreatorFeed.map((v) => v.id),
+    ['short_small']
+  );
+
+  const musicCategoryFeed = rankShortsFeed([subTechVideo, smallCreatorShort], ctx, nowMs, {
+    mode: 'for_you',
+    category: 'Music',
+  });
+  assert.deepEqual(
+    musicCategoryFeed.map((v) => v.id),
+    ['short_small']
+  );
+});
+
+test('buildConditionalSections includes discover_new_creators and popular_language when populated', () => {
+  const newCreatorVids = [
+    makeCandidate({ id: 'nc_1', channelId: 'ch_nc1', subscriberCount: 5000, language: 'Tamil' }),
+    makeCandidate({ id: 'nc_2', channelId: 'ch_nc2', subscriberCount: 12000, language: 'Tamil' }),
+  ];
+  const recommended = [
+    makeCandidate({ id: 'rec_1', channelId: 'ch_rec1', category: 'Education', language: 'English', views: 500_000 }),
+    makeCandidate({ id: 'rec_2', channelId: 'ch_rec2', category: 'Education', language: 'English', views: 400_000 }),
+    makeCandidate({ id: 'rec_3', channelId: 'ch_rec3', category: 'Technology', tags: ['tech'], language: 'Hindi', views: 600_000 }),
+    makeCandidate({ id: 'rec_4', channelId: 'ch_rec4', category: 'Music', tags: ['music'], language: 'Hindi', views: 550_000 }),
+  ];
+  const sections = buildConditionalSections({
+    recommended,
+    continueWatching: [],
+    trending: [makeCandidate({ id: 'tr_1', channelId: 'ch_tr1', views: 900_000 })],
+    subscribedVideos: [],
+    newCreators: newCreatorVids,
+    topInterestTopic: 'Education',
+    preferredLanguage: 'Hindi',
+  });
+
+  assert.equal(sections.some((s) => s.id === 'discover_new_creators'), true);
+  assert.equal(sections.some((s) => s.id === 'popular_language'), true);
+  assert.equal(sections.some((s) => s.id === 'trending_india'), true);
+});
+
 

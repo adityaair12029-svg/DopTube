@@ -11,6 +11,7 @@ import type {
   VideoItem,
 } from './types';
 import { apiFetch, clearAuthToken, getAuthToken, setAuthToken } from './lib/api';
+import { enqueueBehaviorEvent } from './lib/eventsQueue';
 import { onFirebaseAuthState, signOutFirebase } from './firebase';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
@@ -30,7 +31,7 @@ import {
 import { HomeView } from './pages/HomeView';
 import { SearchView } from './pages/SearchView';
 import { WatchView } from './pages/WatchView';
-import { ShortsView } from './pages/ShortsView';
+import { ShortsView, type ShortsFeedMode } from './pages/ShortsView';
 import { MusicView } from './pages/MusicView';
 import {
   ChannelView,
@@ -67,6 +68,7 @@ export default function App() {
 
   // Personalized Home feed + infinite scroll state
   const [homeFeedTab, setHomeFeedTab] = useState<'for_you' | 'following'>('for_you');
+  const [shortsFeedMode, setShortsFeedMode] = useState<ShortsFeedMode>('for_you');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedLanguage, setSelectedLanguage] = useState('All');
   const [videos, setVideos] = useState<VideoItem[]>([]);
@@ -90,6 +92,7 @@ export default function App() {
   const [autoplayEnabled, setAutoplayEnabled] = useState(true);
   const [autoplayMode, setAutoplayMode] = useState<'recommended' | 'playlist' | 'queue' | 'repeat'>('recommended');
   const [activePlaylistId, setActivePlaylistId] = useState('');
+  const [activeWatchVideo, setActiveWatchVideo] = useState<VideoItem | null>(null);
 
   // Music Hub & Mini Audio Player state
   const [activeMusicTrack, setActiveMusicTrack] = useState<MusicTrack | null>(null);
@@ -106,6 +109,7 @@ export default function App() {
   const [searchSort, setSearchSort] = useState<'relevance' | 'date' | 'views'>('relevance');
   const [searchDuration, setSearchDuration] = useState<'all' | 'short' | 'medium' | 'long'>('all');
   const [searchLanguage, setSearchLanguage] = useState('All');
+  const [searchUploadDate, setSearchUploadDate] = useState<'any' | 'today' | 'week' | 'month'>('any');
 
   // Subscriptions & Notifications
   const [subscribedChannels, setSubscribedChannels] = useState<ChannelSummary[]>([]);
@@ -205,7 +209,7 @@ export default function App() {
           nextPageToken?: string | null;
           hasMore?: boolean;
           discoveryStatus?: DiscoveryStatus | null;
-        }>('/api/recommendations/shorts'),
+        }>(`/api/recommendations/shorts?feed=${encodeURIComponent(shortsFeedMode)}`),
       ]);
       setVideos(mainRes.videos);
       setSections(mainRes.sections || []);
@@ -229,7 +233,7 @@ export default function App() {
     } finally {
       setFeedLoading(false);
     }
-  }, [homeFeedTab, selectedCategory, selectedLanguage]);
+  }, [homeFeedTab, shortsFeedMode, selectedCategory, selectedLanguage]);
 
   useEffect(() => {
     const unsubscribe = onFirebaseAuthState(async (fbUser) => {
@@ -298,7 +302,11 @@ export default function App() {
         videos: VideoItem[];
         nextPageToken?: string | null;
         hasMore?: boolean;
-      }>(`/api/recommendations/shorts?pageToken=${encodeURIComponent(shortsNextPageToken)}`);
+      }>(
+        `/api/recommendations/shorts?feed=${encodeURIComponent(shortsFeedMode)}&pageToken=${encodeURIComponent(
+          shortsNextPageToken
+        )}`
+      );
       setShorts((prev) => {
         const existing = new Set(prev.map((s) => s.id));
         const appended = res.videos.filter((s) => !existing.has(s.id));
@@ -311,10 +319,16 @@ export default function App() {
     } finally {
       setShortsLoadingMore(false);
     }
-  }, [shortsLoadingMore, shortsHasMore, shortsNextPageToken]);
+  }, [shortsLoadingMore, shortsHasMore, shortsNextPageToken, shortsFeedMode]);
 
   const executeSearch = useCallback(
-    async (q: string, sort = searchSort, duration = searchDuration, lang = searchLanguage) => {
+    async (
+      q: string,
+      sort = searchSort,
+      duration = searchDuration,
+      lang = searchLanguage,
+      uploadDate = searchUploadDate
+    ) => {
       setSearchLoading(true);
       setSearchNextPageToken('');
       setSearchHasMore(false);
@@ -326,7 +340,9 @@ export default function App() {
           hasMore?: boolean;
           discoveryStatus?: DiscoveryStatus | null;
         }>(
-          `/api/search?q=${encodeURIComponent(q)}&sort=${sort}&duration=${duration}&language=${encodeURIComponent(lang)}`
+          `/api/search?q=${encodeURIComponent(q)}&sort=${sort}&duration=${duration}&language=${encodeURIComponent(
+            lang
+          )}&uploadDate=${encodeURIComponent(uploadDate)}`
         );
         setSearchResults(res.videos);
         setSearchChannels(res.channels);
@@ -342,7 +358,7 @@ export default function App() {
         setSearchLoading(false);
       }
     },
-    [searchSort, searchDuration, searchLanguage]
+    [searchSort, searchDuration, searchLanguage, searchUploadDate]
   );
 
   const handleLoadMoreSearch = useCallback(async () => {
@@ -356,7 +372,7 @@ export default function App() {
       }>(
         `/api/search?q=${encodeURIComponent(searchQuery)}&sort=${searchSort}&duration=${searchDuration}&language=${encodeURIComponent(
           searchLanguage
-        )}&pageToken=${encodeURIComponent(searchNextPageToken)}`
+        )}&uploadDate=${encodeURIComponent(searchUploadDate)}&pageToken=${encodeURIComponent(searchNextPageToken)}`
       );
       setSearchResults((prev) => {
         const existing = new Set(prev.map((v) => v.id));
@@ -370,17 +386,29 @@ export default function App() {
     } finally {
       setSearchLoadingMore(false);
     }
-  }, [searchLoadingMore, searchHasMore, searchNextPageToken, searchQuery, searchSort, searchDuration, searchLanguage]);
+  }, [
+    searchLoadingMore,
+    searchHasMore,
+    searchNextPageToken,
+    searchQuery,
+    searchSort,
+    searchDuration,
+    searchLanguage,
+    searchUploadDate,
+  ]);
 
   useEffect(() => {
     if (page === 'search') {
-      void executeSearch(searchQuery, searchSort, searchDuration, searchLanguage);
+      void executeSearch(searchQuery, searchSort, searchDuration, searchLanguage, searchUploadDate);
     }
-  }, [page, searchQuery, searchSort, searchDuration, searchLanguage, executeSearch]);
+  }, [page, searchQuery, searchSort, searchDuration, searchLanguage, searchUploadDate, executeSearch]);
 
   const navigateTo = useCallback((nextPage: AppPage, param = '') => {
     setPage(nextPage);
     setPageParam(param);
+    if (nextPage !== 'watch') {
+      setActiveWatchVideo(null);
+    }
     if (nextPage === 'watch') {
       setMiniPlayerVideo(null);
       setActiveMusicTrack(null);
@@ -426,6 +454,7 @@ export default function App() {
 
   const handleWatch = useCallback(
     (videoId: string, clickedVideo?: VideoItem) => {
+      enqueueBehaviorEvent({ eventType: 'click', videoId, surface: page });
       apiFetch('/api/recommendations/click', {
         method: 'POST',
         body: JSON.stringify({ videoId }),
@@ -445,10 +474,13 @@ export default function App() {
       }
       navigateTo('watch', videoId);
     },
-    [navigateTo, openShort, videos, shorts, searchResults, queue, sections]
+    [navigateTo, openShort, page, videos, shorts, searchResults, queue, sections]
   );
 
   const handleImpressions = useCallback((videoIds: string[]) => {
+    for (const vid of videoIds) {
+      enqueueBehaviorEvent({ eventType: 'impression', videoId: vid, surface: 'home' });
+    }
     apiFetch('/api/recommendations/impression', {
       method: 'POST',
       body: JSON.stringify({ videoIds, surface: 'home' }),
@@ -749,9 +781,15 @@ export default function App() {
             sort={searchSort}
             duration={searchDuration}
             language={searchLanguage}
+            uploadDate={searchUploadDate}
             onChangeSort={setSearchSort}
             onChangeDuration={setSearchDuration}
             onChangeLanguage={setSearchLanguage}
+            onChangeUploadDate={setSearchUploadDate}
+            onQuickSearch={(q) => {
+              setSearchQuery(q);
+              navigateTo('search', q);
+            }}
             {...commonCardActions}
           />
         )}
@@ -780,6 +818,7 @@ export default function App() {
             }}
             onToast={showToast}
             onSubscriptionsChanged={loadUserContext}
+            onVideoLoaded={setActiveWatchVideo}
           />
         )}
 
@@ -787,6 +826,11 @@ export default function App() {
           <ShortsView
             shorts={shorts}
             initialShortId={pageParam}
+            feedMode={shortsFeedMode}
+            onChangeFeedMode={(mode) => {
+              setShortsFeedMode(mode);
+              setShortsNextPageToken('');
+            }}
             user={user}
             hasMore={shortsHasMore}
             loadingMore={shortsLoadingMore}
@@ -1032,7 +1076,12 @@ export default function App() {
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {/* Multi-Turn DopTube AI Chatbot */}
-      <GeminiChatbot user={user} hideOnMobile={page === 'shorts'} />
+      <GeminiChatbot
+        user={user}
+        hideFab={page === 'shorts'}
+        hideOnMobile={page === 'watch'}
+        activeWatchVideo={page === 'watch' ? activeWatchVideo : null}
+      />
 
       {/* Toast Notification */}
       {toast && (

@@ -7,7 +7,9 @@ import {
   getUserPreferencesPayload,
   hydrateVideoRow,
   recordBehaviorEvent,
+  recordBehaviorEventBatch,
   toCandidate,
+  type BehaviorEventInput,
   type VideoDbRow,
 } from './aiService.ts';
 import { rateLimit, requireAdmin, requireAuth, type AuthedRequest } from './auth.ts';
@@ -22,6 +24,7 @@ import {
   resolveNextVideo,
   type BehaviorEventType,
   type CandidateVideo,
+  type ShortsFeedMode,
 } from './recommendation.ts';
 import { GoogleGenAI } from '@google/genai';
 import { validateContentCandidate } from './validation.ts';
@@ -182,6 +185,7 @@ export function registerAiAndLibraryRoutes(
 
       const topInterestTopic = Object.entries(ctx.interestScores).sort((a, b) => b[1] - a[1])[0]?.[0];
       const trending = rankTrendingIndia(pool, ctx.validation);
+      const newCreators = pool.filter((v) => !v.isShort && v.subscriberCount < 250_000);
 
       sections = buildConditionalSections({
         recommended: rec.items,
@@ -189,6 +193,8 @@ export function registerAiAndLibraryRoutes(
         trending,
         subscribedVideos,
         topInterestTopic,
+        preferredLanguage: ctx.preferredLanguages[0],
+        newCreators,
       });
     }
 
@@ -229,13 +235,30 @@ export function registerAiAndLibraryRoutes(
 
   app.get('/api/recommendations/shorts', asyncRoute(async (req: AuthedRequest, res) => {
     const language = String(req.query.language || 'All');
+    const category = String(req.query.category || 'All');
+    const feedRaw = String(req.query.feed || 'for_you');
+    const mode: ShortsFeedMode = ['for_you', 'following', 'trending', 'new_creators'].includes(feedRaw)
+      ? (feedRaw as ShortsFeedMode)
+      : 'for_you';
     const pageToken = String(req.query.pageToken || '').trim();
     const ctx = buildUserAiContext(req.auth?.userId);
+
+    if (mode === 'following' && !req.auth) {
+      res.json({
+        videos: [],
+        nextPageToken: null,
+        hasMore: false,
+        followingRequiresAuth: true,
+        discoveryStatus: getDiscoveryStatus(),
+      });
+      return;
+    }
+
     const native =
       pageToken === ''
         ? filterAndSortVideos(
             getAllNativeCandidates().filter((v) => v.isShort),
-            { language }
+            { language, category }
           )
         : [];
     const topTopics = Object.entries(ctx.interestScores)
@@ -243,16 +266,41 @@ export function registerAiAndLibraryRoutes(
       .map(([topic]) => topic)
       .slice(0, 5);
     const seed = Number(req.query.seed || 0) || Math.floor(Date.now() / (5 * 60 * 1000)) % 12;
-    const extPaged = await fetchExternalFeedPaged({
-      shorts: true,
-      language,
-      pageToken,
-      interestTopics: topTopics,
-      recentSearches: ctx.recentSearches,
-      preferredLanguage: ctx.preferredLanguages[0],
-      refreshSeed: seed,
+
+    let subscribedShorts: CandidateVideo[] = [];
+    if (mode === 'following' && req.auth && pageToken === '') {
+      const subRows = db
+        .prepare(`
+          SELECT v.*, c.name as channel_name, c.handle as channel_handle, c.avatar_url as channel_avatar,
+                 c.verified as channel_verified, c.subscriber_count
+          FROM videos v
+          JOIN channels c ON c.id = v.channel_id
+          JOIN subscriptions s ON s.channel_id = c.id
+          WHERE s.user_id = ? AND v.visibility = 'public' AND v.status = 'published' AND v.is_short = 1
+          ORDER BY v.created_at DESC
+        `)
+        .all(req.auth.userId) as unknown as VideoDbRow[];
+      subscribedShorts = subRows.map(hydrateVideoRow).map(toCandidate);
+    }
+
+    const extPaged =
+      mode === 'following'
+        ? { items: [], nextPageToken: null }
+        : await fetchExternalFeedPaged({
+            shorts: true,
+            category,
+            language,
+            trending: mode === 'trending',
+            pageToken,
+            interestTopics: topTopics,
+            recentSearches: ctx.recentSearches,
+            preferredLanguage: ctx.preferredLanguages[0],
+            refreshSeed: seed,
+          });
+    const ranked = rankShortsFeed([...subscribedShorts, ...native, ...extPaged.items.map(toCandidate)], ctx, Date.now(), {
+      mode,
+      category,
     });
-    const ranked = rankShortsFeed([...native, ...extPaged.items.map(toCandidate)], ctx);
     res.json({
       videos: ranked,
       nextPageToken: extPaged.nextPageToken,
@@ -378,8 +426,9 @@ export function registerAiAndLibraryRoutes(
   // BEHAVIOR TRACKING & FEEDBACK EVENTS
   // =========================================================================
 
-  app.post('/api/events/watch', rateLimit(120, 60_000), async (req: AuthedRequest, res) => {
-    const { videoId, eventType, progressPct = 0, watchDurationSec = 0, sessionId = '' } = req.body as {
+  app.post('/api/events/watch', rateLimit(120, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
+    const { eventId, videoId, eventType, progressPct = 0, watchDurationSec = 0, sessionId = '' } = (req.body ?? {}) as {
+      eventId?: string;
       videoId?: string;
       eventType?: BehaviorEventType;
       progressPct?: number;
@@ -392,6 +441,7 @@ export function registerAiAndLibraryRoutes(
     }
     await ensureExternalVideoRecord(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth?.userId,
       sessionId,
       videoId,
@@ -400,56 +450,103 @@ export function registerAiAndLibraryRoutes(
       watchDurationSec,
     });
     res.json(result);
-  });
+  }));
 
-  app.post('/api/events/skip', rateLimit(120, 60_000), async (req: AuthedRequest, res) => {
-    const { videoId, watchDurationSec = 0 } = req.body as { videoId?: string; watchDurationSec?: number };
+  app.post('/api/events/batch', rateLimit(60, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
+    const { events = [] } = (req.body ?? {}) as {
+      events?: Array<{
+        eventId?: string;
+        videoId?: string;
+        eventType?: BehaviorEventType;
+        progressPct?: number;
+        watchDurationSec?: number;
+        sessionId?: string;
+        surface?: string;
+        metadata?: Record<string, unknown>;
+      }>;
+    };
+    if (!Array.isArray(events) || events.length === 0) {
+      res.status(400).json({ error: 'events array is required.' });
+      return;
+    }
+    const bounded = events.slice(0, 50).filter((e) => e && typeof e.videoId === 'string' && typeof e.eventType === 'string');
+    const uniqueVideoIds = Array.from(new Set(bounded.map((e) => e.videoId!))).slice(0, 20);
+    for (const vid of uniqueVideoIds) {
+      await ensureExternalVideoRecord(vid);
+    }
+    const prepared: BehaviorEventInput[] = bounded.map((e) => ({
+      eventId: e.eventId,
+      userId: req.auth?.userId,
+      sessionId: e.sessionId,
+      videoId: e.videoId!,
+      eventType: e.eventType!,
+      progressPct: e.progressPct,
+      watchDurationSec: e.watchDurationSec,
+      metadata: e.surface ? { ...(e.metadata ?? {}), surface: e.surface } : e.metadata,
+    }));
+    const result = recordBehaviorEventBatch(prepared);
+    res.json({ ok: true, ...result });
+  }));
+
+  app.post('/api/events/skip', rateLimit(120, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
+    const { eventId, videoId, watchDurationSec = 0 } = (req.body ?? {}) as {
+      eventId?: string;
+      videoId?: string;
+      watchDurationSec?: number;
+    };
     if (!videoId) {
       res.status(400).json({ error: 'videoId required.' });
       return;
     }
     await ensureExternalVideoRecord(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth?.userId,
       videoId,
       eventType: 'skip',
       watchDurationSec,
     });
     res.json(result);
-  });
+  }));
 
-  app.post('/api/events/like', requireAuth, async (req: AuthedRequest, res) => {
-    const { videoId, reaction = 'like' } = req.body as { videoId?: string; reaction?: 'like' | 'dislike' };
+  app.post('/api/events/like', requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
+    const { eventId, videoId, reaction = 'like' } = (req.body ?? {}) as {
+      eventId?: string;
+      videoId?: string;
+      reaction?: 'like' | 'dislike';
+    };
     if (!videoId) {
       res.status(400).json({ error: 'videoId required.' });
       return;
     }
     await ensureExternalVideoRecord(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth!.userId,
       videoId,
       eventType: reaction === 'dislike' ? 'dislike' : 'like',
     });
     res.json(result);
-  });
+  }));
 
-  app.post('/api/events/share', rateLimit(60, 60_000), async (req: AuthedRequest, res) => {
-    const { videoId } = req.body as { videoId?: string };
+  app.post('/api/events/share', rateLimit(60, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
+    const { eventId, videoId } = (req.body ?? {}) as { eventId?: string; videoId?: string };
     if (!videoId) {
       res.status(400).json({ error: 'videoId required.' });
       return;
     }
     await ensureExternalVideoRecord(videoId);
     const result = recordBehaviorEvent({
+      eventId,
       userId: req.auth?.userId,
       videoId,
       eventType: 'share',
     });
     res.json(result);
-  });
+  }));
 
-  app.post('/api/events/feedback', requireAuth, async (req: AuthedRequest, res) => {
-    const { videoId, channelId, feedbackType, reason = '' } = req.body as {
+  app.post('/api/events/feedback', requireAuth, asyncRoute(async (req: AuthedRequest, res) => {
+    const { videoId, channelId, feedbackType, reason = '' } = (req.body ?? {}) as {
       videoId?: string;
       channelId?: string;
       feedbackType?: 'not_interested' | 'dont_recommend_creator';
@@ -482,10 +579,10 @@ export function registerAiAndLibraryRoutes(
       });
     }
     res.json({ ok: true });
-  });
+  }));
 
-  app.post('/api/recommendations/impression', rateLimit(200, 60_000), (req: AuthedRequest, res) => {
-    const { videoIds = [], surface = 'home' } = req.body as { videoIds?: string[]; surface?: string };
+  app.post('/api/recommendations/impression', rateLimit(200, 60_000), asyncRoute((req: AuthedRequest, res) => {
+    const { videoIds = [], surface = 'home' } = (req.body ?? {}) as { videoIds?: string[]; surface?: string };
     const stmt = db.prepare(`
       INSERT INTO recommendation_impressions (id, user_id, video_id, surface, position, score, clicked, created_at)
       VALUES (?, ?, ?, ?, ?, 0, 0, ?)
@@ -497,10 +594,14 @@ export function registerAiAndLibraryRoutes(
       }
     });
     res.json({ ok: true });
-  });
+  }));
 
-  app.post('/api/recommendations/click', rateLimit(120, 60_000), (req: AuthedRequest, res) => {
-    const { videoId, surface = 'home' } = req.body as { videoId?: string; surface?: string };
+  app.post('/api/recommendations/click', rateLimit(120, 60_000), asyncRoute((req: AuthedRequest, res) => {
+    const { videoId, surface = 'home', eventId } = (req.body ?? {}) as {
+      videoId?: string;
+      surface?: string;
+      eventId?: string;
+    };
     if (!videoId) {
       res.status(400).json({ error: 'videoId required.' });
       return;
@@ -511,9 +612,9 @@ export function registerAiAndLibraryRoutes(
         WHERE user_id = ? AND video_id = ? AND surface = ?
       `).run(req.auth.userId, videoId, surface);
     }
-    recordBehaviorEvent({ userId: req.auth?.userId, videoId, eventType: 'click' });
+    recordBehaviorEvent({ eventId, userId: req.auth?.userId, videoId, eventType: 'click', metadata: { surface } });
     res.json({ ok: true });
-  });
+  }));
 
   // =========================================================================
   // PREFERENCES, INTEREST WEIGHTS, BLOCKED CREATORS/TOPICS & DATA PRIVACY
@@ -903,11 +1004,19 @@ export function registerAiAndLibraryRoutes(
   // MULTI-TURN GEMINI AI ASSISTANT CHATBOT (FREE-TIER MODELS ONLY)
   // =========================================================================
 
-  app.post('/api/ai/chat', rateLimit(30, 60_000), async (req: AuthedRequest, res) => {
-    const { message, history = [], role = 'general' } = req.body as {
+  app.post('/api/ai/chat', rateLimit(30, 60_000), asyncRoute(async (req: AuthedRequest, res) => {
+    const { message, history = [], role = 'general', videoContext } = (req.body ?? {}) as {
       message?: string;
       history?: Array<{ role?: string; text?: string }>;
       role?: 'general' | 'fast' | 'creator' | 'discovery';
+      videoContext?: {
+        id?: string;
+        title?: string;
+        channelName?: string;
+        category?: string;
+        language?: string;
+        description?: string;
+      } | null;
     };
 
     const cleanMessage = typeof message === 'string' ? message.trim() : '';
@@ -945,10 +1054,16 @@ export function registerAiAndLibraryRoutes(
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([t]) => t);
-    const contextSuffix =
+    const topicSuffix =
       userTopics.length > 0
         ? ` The current viewer follows topics: ${userTopics.join(', ')} (languages: ${ctx.preferredLanguages.join(', ')}).`
         : '';
+
+    const safeVideoMeta =
+      videoContext && typeof videoContext.title === 'string' && videoContext.title.trim()
+        ? ` Active video metadata only (you cannot see the video frames or audio stream—state this limitation clearly if asked about visual/spoken details not in metadata): Title="${videoContext.title.trim().slice(0, 180)}", Channel="${String(videoContext.channelName || '').slice(0, 80)}", Category="${String(videoContext.category || '').slice(0, 60)}", Language="${String(videoContext.language || '').slice(0, 40)}", Description="${String(videoContext.description || '').slice(0, 400)}".`
+        : '';
+    const contextSuffix = `${topicSuffix}${safeVideoMeta}`;
 
     const normalizedHistory = Array.isArray(history)
       ? history
@@ -1010,5 +1125,5 @@ export function registerAiAndLibraryRoutes(
       console.error('Gemini chat error:', friendly);
       res.status(502).json({ error: friendly });
     }
-  });
+  }));
 }

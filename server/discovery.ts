@@ -475,7 +475,7 @@ export function mapDailymotionItem(
   if (!item.id || !item.title) return null;
   const durationSec = Math.max(0, Math.round(Number(item.duration || 0)));
   const ownerUsername = (item['owner.username'] || 'dailymotion').replace(/[^a-zA-Z0-9_-]/g, '') || 'creator';
-  const ownerName = item['owner.screenname'] || ownerUsername;
+  const ownerName = cleanHtmlText(item['owner.screenname'] || ownerUsername);
   const tags = Array.isArray(item.tags) ? item.tags.slice(0, 10) : [];
   const isShort =
     Boolean(opts?.forceShort) ||

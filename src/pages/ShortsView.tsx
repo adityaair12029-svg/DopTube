@@ -23,9 +23,22 @@ import type { DiscoveryStatus, UserProfile, VideoComment, VideoItem } from '../t
 import { apiFetch } from '../lib/api';
 import { formatViews } from '../lib/format';
 
+export type ShortsFeedMode = 'for_you' | 'following' | 'trending' | 'new_creators';
+
+const SHORTS_FEED_TABS: Array<{ id: ShortsFeedMode; label: string }> = [
+  { id: 'for_you', label: 'For You' },
+  { id: 'following', label: 'Following' },
+  { id: 'trending', label: 'Trending' },
+  { id: 'new_creators', label: 'New Creators' },
+];
+
+const PLAYBACK_SPEEDS = [1, 1.25, 1.5, 2] as const;
+
 interface ShortsViewProps {
   shorts: VideoItem[];
   initialShortId?: string;
+  feedMode?: ShortsFeedMode;
+  onChangeFeedMode?: (mode: ShortsFeedMode) => void;
   user: UserProfile | null;
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -43,6 +56,8 @@ interface ShortsViewProps {
 export const ShortsView: React.FC<ShortsViewProps> = ({
   shorts,
   initialShortId,
+  feedMode = 'for_you',
+  onChangeFeedMode,
   user,
   hasMore = false,
   loadingMore = false,
@@ -59,6 +74,8 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [doubleTapHeartId, setDoubleTapHeartId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
@@ -73,12 +90,31 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
   const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
   const activeVideoRef = useRef<HTMLVideoElement | null>(null);
   const didScrollInitialRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
+  const lastTapAtRef = useRef<number>(0);
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden && activeVideoRef.current && !activeVideoRef.current.paused) {
+        activeVideoRef.current.pause();
+        setPlaying(false);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (activeVideoRef.current) {
+      activeVideoRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate, activeIndex]);
 
   const toggleFullscreen = async () => {
     const target = rootRef.current;
@@ -209,19 +245,71 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [safeIndex, visibleShorts.length]);
 
+  const cyclePlaybackRate = () => {
+    const idx = PLAYBACK_SPEEDS.indexOf(playbackRate as (typeof PLAYBACK_SPEEDS)[number]);
+    const next = PLAYBACK_SPEEDS[(idx + 1) % PLAYBACK_SPEEDS.length];
+    setPlaybackRate(next);
+  };
+
+  const triggerDoubleTapLike = (item: VideoItem) => {
+    setDoubleTapHeartId(item.id);
+    window.setTimeout(() => {
+      setDoubleTapHeartId((prev) => (prev === item.id ? null : prev));
+    }, 650);
+    if (!likedIds.has(item.id)) {
+      void handleLike(item);
+    }
+  };
+
   if (!current) {
     const showDiscoveryNotice =
       discoveryStatus && (!discoveryStatus.configured || Boolean(discoveryStatus.issue));
     return (
-      <div className="py-20 text-center max-w-md mx-auto px-4">
-        <AlertCircle className="w-8 h-8 mx-auto mb-3 text-[#536471] dark:text-[#71767b]" />
-        <p className="text-base font-bold text-[#0f1419] dark:text-[#e7e9ea]">No Shorts available yet</p>
-        <p className="text-sm text-[#536471] dark:text-[#71767b] mt-1.5">
-          {showDiscoveryNotice
+      <div className="py-10 text-center max-w-md mx-auto px-4">
+        {onChangeFeedMode && (
+          <div className="mb-8 inline-flex items-center gap-1 p-1 rounded-full bg-[var(--dt-surface)] border border-[var(--dt-border)]">
+            {SHORTS_FEED_TABS.map((tab) => {
+              const active = feedMode === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => onChangeFeedMode(tab.id)}
+                  className={`h-8 px-3 rounded-full text-xs font-semibold cursor-pointer transition-colors ${
+                    active ? 'jio-gradient text-white' : 'text-[var(--dt-text-muted)] hover:text-[var(--dt-text)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <AlertCircle className="w-8 h-8 mx-auto mb-3 text-[var(--dt-text-muted)]" />
+        <p className="text-base font-bold text-[var(--dt-text)]">
+          {feedMode === 'following' && !user
+            ? 'Sign in to watch Shorts from followed creators'
+            : feedMode === 'following'
+            ? 'No Shorts from creators you follow yet'
+            : 'No Shorts available yet'}
+        </p>
+        <p className="text-sm text-[var(--dt-text-muted)] mt-1.5">
+          {feedMode === 'following' && !user
+            ? 'Sign in to see Shorts from channels you subscribe to.'
+            : showDiscoveryNotice
             ? discoveryStatus?.issue?.message ||
               'Configure EXTERNAL_VIDEO_API_KEY on your server to load external Shorts, or upload vertical videos in DopTube Studio.'
-            : 'Upload a vertical video under 60 seconds in DopTube Studio to publish the first Short.'}
+            : 'Try switching feed tabs or upload a vertical video under 60 seconds in DopTube Studio.'}
         </p>
+        {feedMode === 'following' && !user && (
+          <button
+            type="button"
+            onClick={onOpenAuth}
+            className="mt-4 h-9 px-5 rounded-full bg-black dark:bg-white text-white dark:text-black text-xs font-bold cursor-pointer"
+          >
+            Sign in
+          </button>
+        )}
       </div>
     );
   }
@@ -334,7 +422,22 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
       {/* Real Vertical Scroll-Snap Shorts Container */}
       <div
         ref={feedRef}
-        className="relative h-full w-full md:max-w-[460px] overflow-y-auto snap-y snap-mandatory no-scrollbar rounded-none md:rounded-2xl bg-black border-0 md:border md:border-[#e5e7eb] md:dark:border-[#2f3336] shadow-2xl"
+        onTouchStart={(e) => {
+          touchStartYRef.current = e.touches[0]?.clientY ?? null;
+        }}
+        onTouchEnd={(e) => {
+          const startY = touchStartYRef.current;
+          touchStartYRef.current = null;
+          if (startY === null) return;
+          const endY = e.changedTouches[0]?.clientY ?? startY;
+          const delta = startY - endY;
+          if (delta > 55 && safeIndex < visibleShorts.length - 1) {
+            goNext();
+          } else if (delta < -55 && safeIndex > 0) {
+            goPrev();
+          }
+        }}
+        className="relative h-full w-full md:max-w-[460px] overflow-y-auto snap-y snap-mandatory no-scrollbar rounded-none md:rounded-2xl bg-black border-0 md:border md:border-[var(--dt-border)] shadow-2xl"
       >
         {visibleShorts.map((item, idx) => {
           const isCurrent = idx === safeIndex;
@@ -352,55 +455,101 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
               }}
               className="relative h-full w-full snap-start snap-always flex items-center justify-center overflow-hidden bg-black"
             >
-              {/* Always-available Top Back + Fullscreen Chrome */}
-              <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none">
-                <div className="flex items-center gap-2 pointer-events-auto">
-                  {onBack && (
+              {/* Always-available Top Back, Feed Tabs & Fullscreen Chrome */}
+              <div className="absolute top-0 left-0 right-0 z-20 pt-3 px-3 pb-6 bg-gradient-to-b from-black/85 via-black/45 to-transparent flex flex-col gap-2 pointer-events-none">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 pointer-events-auto">
+                    {onBack && (
+                      <button
+                        type="button"
+                        onClick={onBack}
+                        aria-label="Back from Shorts"
+                        className="w-9 h-9 rounded-full bg-black/65 hover:bg-black/80 text-white border border-white/15 flex items-center justify-center cursor-pointer backdrop-blur-xs"
+                      >
+                        <ArrowLeft className="w-4 h-4" />
+                      </button>
+                    )}
+                    <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-bold tracking-wide border border-white/15 backdrop-blur-xs">
+                      Shorts
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 pointer-events-auto">
+                    {!(item.sourceType === 'external' && item.externalEmbedUrl) && !isFailed && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={cyclePlaybackRate}
+                          aria-label={`Playback speed ${playbackRate}x`}
+                          className="h-9 px-2.5 rounded-full bg-black/65 text-white border border-white/15 text-xs font-bold font-mono-nums flex items-center justify-center cursor-pointer"
+                        >
+                          {playbackRate}x
+                        </button>
+                        <button
+                          type="button"
+                          onClick={togglePlay}
+                          aria-label={playing ? 'Pause Short' : 'Play Short'}
+                          className="w-9 h-9 rounded-full bg-black/65 text-white border border-white/15 flex items-center justify-center cursor-pointer"
+                        >
+                          {playing ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMuted((m) => !m)}
+                          aria-label={muted ? 'Unmute Short' : 'Mute Short'}
+                          className="w-9 h-9 rounded-full bg-black/65 text-white border border-white/15 flex items-center justify-center cursor-pointer"
+                        >
+                          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
-                      onClick={onBack}
-                      aria-label="Back from Shorts"
+                      onClick={toggleFullscreen}
+                      aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen Short'}
                       className="w-9 h-9 rounded-full bg-black/65 hover:bg-black/80 text-white border border-white/15 flex items-center justify-center cursor-pointer backdrop-blur-xs"
                     >
-                      <ArrowLeft className="w-4 h-4" />
+                      {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                     </button>
-                  )}
-                  <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-bold tracking-wide border border-white/15 backdrop-blur-xs">
-                    Shorts
-                  </span>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 pointer-events-auto">
-                  {!(item.sourceType === 'external' && item.externalEmbedUrl) && !isFailed && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={togglePlay}
-                        aria-label={playing ? 'Pause Short' : 'Play Short'}
-                        className="w-9 h-9 rounded-full bg-black/65 text-white border border-white/15 flex items-center justify-center cursor-pointer"
-                      >
-                        {playing ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMuted((m) => !m)}
-                        aria-label={muted ? 'Unmute Short' : 'Mute Short'}
-                        className="w-9 h-9 rounded-full bg-black/65 text-white border border-white/15 flex items-center justify-center cursor-pointer"
-                      >
-                        {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={toggleFullscreen}
-                    aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen Short'}
-                    className="w-9 h-9 rounded-full bg-black/65 hover:bg-black/80 text-white border border-white/15 flex items-center justify-center cursor-pointer backdrop-blur-xs"
+                {onChangeFeedMode && (
+                  <div
+                    role="tablist"
+                    aria-label="Shorts feed filter"
+                    className="flex items-center gap-1 overflow-x-auto no-scrollbar pointer-events-auto"
                   >
-                    {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                  </button>
-                </div>
+                    {SHORTS_FEED_TABS.map((tab) => {
+                      const active = feedMode === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => onChangeFeedMode(tab.id)}
+                          className={`h-7 px-3 rounded-full text-[11px] font-bold whitespace-nowrap border transition-colors cursor-pointer backdrop-blur-xs ${
+                            active
+                              ? 'bg-white text-black border-white'
+                              : 'bg-black/55 text-white/90 border-white/15 hover:bg-black/75'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
+
+              {doubleTapHeartId === item.id && (
+                <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full bg-black/55 backdrop-blur-xs flex items-center justify-center animate-ping">
+                    <ThumbsUp className="w-10 h-10 text-white fill-white" />
+                  </div>
+                </div>
+              )}
 
               {isFailed ? (
                 <div className="relative w-full h-full flex flex-col items-center justify-center bg-black text-white p-6 text-center">
@@ -459,7 +608,10 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
                 <video
                   key={item.id}
                   ref={(el) => {
-                    if (isCurrent) activeVideoRef.current = el;
+                    if (isCurrent) {
+                      activeVideoRef.current = el;
+                      if (el) el.playbackRate = playbackRate;
+                    }
                   }}
                   src={item.videoUrl}
                   poster={item.thumbnailUrl}
@@ -467,7 +619,16 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
                   loop
                   muted={muted || !isCurrent}
                   playsInline
-                  onClick={togglePlay}
+                  onClick={() => {
+                    const now = Date.now();
+                    if (now - lastTapAtRef.current < 280) {
+                      lastTapAtRef.current = 0;
+                      triggerDoubleTapLike(item);
+                    } else {
+                      lastTapAtRef.current = now;
+                      togglePlay();
+                    }
+                  }}
                   onError={() => setFailedIds((prev) => new Set(prev).add(item.id))}
                   className="w-full h-full object-cover cursor-pointer"
                 />
@@ -507,7 +668,7 @@ export const ShortsView: React.FC<ShortsViewProps> = ({
               </div>
 
               {/* Right Overlay Actions */}
-              <div className="absolute right-2.5 bottom-24 flex flex-col items-center gap-2.5 text-white">
+              <div className="absolute right-2.5 bottom-28 flex flex-col items-center gap-2 text-white">
                 <button
                   type="button"
                   onClick={() => handleLike(item)}
